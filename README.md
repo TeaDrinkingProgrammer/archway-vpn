@@ -74,19 +74,23 @@ Environment: `FORTISAML_BROWSER=<command>` replaces `xdg-open` for opening the S
 
 ## How it works
 
-```
-GUI (your user)                         Backend (root, via pkexec)              FortiGate
-───────────────                         ──────────────────────────              ─────────
-POST /saml_login?  UID=…&REDIRECT_PORT=p ─────────────────────────────────────▶ (HTTPS, SSO port)
-browser → IdP login → 127.0.0.1:p/?tokenid=…  ◀──────────────────────────────── redirect
-pkexec --backend; stdin: {settings, PSK, token}
-                                        IKE_SA_INIT (UDP 500, Fortinet VIDs) ──▶
-                                        IKE_AUTH (UDP 4500) + EAP:
-                                          identity = client UID, secret = token ▶
-                                        ◀── PSK AUTH, child SA, IP/DNS/routes
-                                        kernel: XFRM states/policies, fsaml0,
-                                        routes (proto 233), resolvectl DNS
-◀── "@@{json}" status events on stdout   keepalives / DPD until "disconnect"/EOF
+```mermaid
+flowchart LR
+    subgraph user["Your user"]
+        gui["GUI"]
+    end
+    subgraph root["Root (via pkexec)"]
+        be["Backend<br/>IKEv2 + tunnel setup"]
+    end
+    kernel["Linux kernel<br/>XFRM, fsaml0, routes, DNS"]
+    fg["FortiGate"]
+
+    gui -->|"1. SAML login via browser (HTTPS)"| fg
+    gui -->|"2. settings, PSK, SSO token (stdin)"| be
+    be <-->|"3. IKEv2 + EAP (UDP 500/4500)"| fg
+    be -->|"4. configure"| kernel
+    kernel <-->|"5. ESP traffic"| fg
+    be -.->|"status events (stdout)"| gui
 ```
 
 - The GUI never runs as root. Root is held only for the length of the connection, by a process that does just IKE and the kernel setup.
@@ -145,9 +149,13 @@ Against a real gateway (no root needed, nothing installed): `fortisaml-gui --pro
 - **Gateway certificate authentication** (AUTH methods other than PSK) is accepted with a warning but **not verified**.
 - **Not supported:**
   - IKEv1, IKE over TCP / "IPsec over TCP"
+  - SSL VPN
+  - Client certificate authentication
   - FortiToken push / OTP challenges
   - EMS / ZTNA compliance checks
   - Fortinet private notifies (license blob, EMS serial)
+
+  SSL VPN, client certificates and FortiToken MFA are available in Fortinet's free, VPN-only [FortiClient](https://www.fortinet.com/support/product-downloads). Use it for those. EMS / ZTNA compliance checks need the licensed FortiClient with EMS. FortiClient VPN-only has no IPsec SSO on Linux, which is the gap this client fills.
 - **One connection at a time.** The xfrm `if_id` and route tag are fixed.
 - **Platform dependencies:** VPN DNS requires systemd-resolved; the root prompt requires a polkit agent.
 
