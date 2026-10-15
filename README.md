@@ -74,20 +74,37 @@ Environment: `FORTISAML_BROWSER=<command>` replaces `xdg-open` for opening the S
 
 ## How it works
 
+```mermaid
+flowchart LR
+    subgraph user["Your user"]
+        gui["GUI"]
+    end
+    subgraph root["Root (via pkexec)"]
+        be["Backend<br/>IKEv2 + tunnel setup"]
+    end
+    browser["Browser"]
+    kernel["Linux kernel<br/>XFRM, fsaml0, routes, DNS"]
+    fg["FortiGate"]
+
+    gui -->|"1. open"| browser
+    browser <-->|"2. SAML login"| fg
+    browser -->|"3. token"| gui
+    gui -->|"4. secrets"| be
+    be <-->|"5. IKEv2"| fg
+    be -->|"6. configure"| kernel
+    kernel <-->|"7. ESP"| fg
+    be -.->|"status"| gui
 ```
-GUI (your user)                         Backend (root, via pkexec)              FortiGate
-───────────────                         ──────────────────────────              ─────────
-POST /saml_login?  UID=…&REDIRECT_PORT=p ─────────────────────────────────────▶ (HTTPS, SSO port)
-browser → IdP login → 127.0.0.1:p/?tokenid=…  ◀──────────────────────────────── redirect
-pkexec --backend; stdin: {settings, PSK, token}
-                                        IKE_SA_INIT (UDP 500, Fortinet VIDs) ──▶
-                                        IKE_AUTH (UDP 4500) + EAP:
-                                          identity = client UID, secret = token ▶
-                                        ◀── PSK AUTH, child SA, IP/DNS/routes
-                                        kernel: XFRM states/policies, fsaml0,
-                                        routes (proto 233), resolvectl DNS
-◀── "@@{json}" status events on stdout   keepalives / DPD until "disconnect"/EOF
-```
+
+1. The GUI starts a SAML session at the FortiGate and opens the SSO page in your browser.
+2. You log in through the browser (HTTPS).
+3. The FortiGate redirects the browser to a local callback in the GUI, carrying the SSO token.
+4. The GUI hands settings, PSK and SSO token to the backend over stdin.
+5. The backend runs IKEv2 + EAP with the FortiGate (UDP 500/4500).
+6. The backend configures the kernel.
+7. The kernel carries the ESP traffic.
+
+The backend reports status events back to the GUI over stdout.
 
 - The GUI never runs as root. Root is held only for the length of the connection, by a process that does just IKE and the kernel setup.
 - Secrets (PSK, SSO token, password) reach the backend over a pipe, never on the command line. The stdin pipe then acts as the control channel: a `disconnect` line, or EOF when the GUI exits or crashes, makes the backend clean up and exit.
@@ -145,9 +162,13 @@ Against a real gateway (no root needed, nothing installed): `fortisaml-gui --pro
 - **Gateway certificate authentication** (AUTH methods other than PSK) is accepted with a warning but **not verified**.
 - **Not supported:**
   - IKEv1, IKE over TCP / "IPsec over TCP"
+  - SSL VPN
+  - Client certificate authentication
   - FortiToken push / OTP challenges
   - EMS / ZTNA compliance checks
   - Fortinet private notifies (license blob, EMS serial)
+
+  SSL VPN, client certificates and FortiToken MFA are available in Fortinet's free, VPN-only [FortiClient](https://www.fortinet.com/support/product-downloads). Use it for those. EMS / ZTNA compliance checks need the licensed FortiClient with EMS. FortiClient VPN-only has no IPsec SSO on Linux, which is the gap this client fills.
 - **One connection at a time.** The xfrm `if_id` and route tag are fixed.
 - **Platform dependencies:** VPN DNS requires systemd-resolved; the root prompt requires a polkit agent.
 
