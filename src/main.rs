@@ -8,6 +8,7 @@ mod charon;
 mod config;
 mod diag;
 mod form;
+mod glide;
 mod keyring;
 mod net;
 mod netlink;
@@ -123,6 +124,7 @@ struct App {
     confirm_delete: bool,
     stats: (u64, u64),
     stats_at: Option<Instant>,
+    glide: glide::Glide,
 }
 
 impl App {
@@ -170,6 +172,7 @@ impl App {
             confirm_delete: false,
             stats: (0, 0),
             stats_at: None,
+            glide: glide::Glide::default(),
         };
         if !config_path().exists() {
             app.save(); // writes the generated UID on first start
@@ -464,6 +467,10 @@ impl eframe::App for App {
         self.main_view(root, &problems);
         self.dialogs(&ctx);
         self.close_guard(&ctx);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.glide.hook(ctx, raw_input);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
