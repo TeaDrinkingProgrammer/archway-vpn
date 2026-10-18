@@ -101,7 +101,7 @@ fn no_token() -> String {
 
 /// How profile `p` authenticates: SSO -> (UID, SAML token), EAP login -> (username, password), else PSK only.
 pub fn client_auth(cfg: &Config, p: &Profile, sso_token: Option<Secret>) -> Result<ClientAuth, String> {
-    let missing = || missing("a username and password", "with SSO off, this connection signs in with them", "enter them under Sign-in, or turn on SSO");
+    let missing = || missing("a username and password", "with SSO off, this connection signs in with them", "enter them under Sign-in, or turn on Single Sign On");
     match (p.sso.enabled, p.auth.mode) {
         (true, _) => Ok(ClientAuth::Eap { identity: EapIdentity::Uid(cfg.uid), secret: sso_token.ok_or_else(no_token)? }),
         (false, UserAuth::Eap) => {
@@ -127,10 +127,10 @@ pub fn build_request(cfg: &Config, p: &Profile, auth: ClientAuth) -> Result<Back
         })?),
     };
     Ok(BackendRequest {
-        gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote gateway"))?,
+        gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway"))?,
         ike_port: p.ike.port,
         psk: Secret::new(p.psk.clone())
-            .map_err(|_| missing("a pre-shared key", "the FortiGate proves who it is with it, also when you sign in with SSO", "enter it under Connection → Pre-shared key"))?,
+            .map_err(|_| missing("a pre-shared key", "the FortiGate proves who it is with it, also when you sign in with SSO. Ask your administrator for it", "enter it under Connection → Pre-shared Key"))?,
         auth,
         local_id: p.ike.local_id.clone(),
         dh_groups: Vec1::try_from_vec(p.ike.dh_groups.clone())
@@ -183,7 +183,7 @@ fn sso_login(cfg: &Config, p: &Profile, cancel: &Arc<AtomicBool>, send: Arc<dyn 
     let s3 = send.clone();
     let res = crate::saml::login(
         &crate::saml::SamlParams {
-            gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote gateway"))?,
+            gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway"))?,
             port: p.sso.port,
             uid: cfg.uid,
             verify_cert: p.sso.verify_cert,
@@ -441,6 +441,24 @@ mod tests {
         p.gateway = Some("vpn.example.com".parse().unwrap());
         p.psk = "k".into();
         (cfg, p)
+    }
+
+    #[test]
+    fn missing_value_help_names_the_fields_as_labelled() {
+        use crate::diag::{Diag, Fix};
+        let (cfg, mut p) = profile();
+        p.gateway = None;
+        let e = preflight(&cfg, &p).unwrap_err();
+        assert!(e.contains("help: enter it under Connection → Remote Gateway"));
+        assert_eq!(Diag::parse(&e).and_then(|d| d.fix()), Some(Fix::Gateway), "the banner offers to go there");
+        let (cfg, mut p) = profile();
+        p.psk.clear();
+        let e = preflight(&cfg, &p).unwrap_err();
+        assert!(e.contains("Ask your administrator for it") && e.contains("help: enter it under Connection → Pre-shared Key"), "{e}");
+        assert_eq!(Diag::parse(&e).and_then(|d| d.fix()), Some(Fix::Psk));
+        let (cfg, mut p) = profile();
+        p.sso.enabled = false;
+        assert_eq!(Diag::parse(&preflight(&cfg, &p).unwrap_err()).and_then(|d| d.fix()), Some(Fix::Credentials));
     }
 
     fn token() -> Secret {

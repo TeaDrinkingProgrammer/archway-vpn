@@ -11,8 +11,7 @@ homepage = "https://github.com/wilco375/fortisaml-gui"
 
 [dependencies]
 async-io = "2.6.0"
-eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "wayland", "x11"] }
-egui-phosphor = "0.14"
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "glow", "links", "wayland", "x11"] }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
 futures-util = "0.3.34"
 getrandom = "0.4"
@@ -86,6 +85,10 @@ assets = [
     ["assets/archway-vpn.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
     ["LICENSE-MIT", "usr/share/doc/archway-vpn/", "644"],
     ["LICENSE-APACHE", "usr/share/doc/archway-vpn/", "644"],
+    # the bundled fonts' licences
+    ["assets/fonts/IBM-Plex-OFL.txt", "usr/share/doc/archway-vpn/", "644"],
+    ["assets/fonts/Lucide-LICENSE.txt", "usr/share/doc/archway-vpn/", "644"],
+    ["assets/fonts/NotoEmoji-OFL.txt", "usr/share/doc/archway-vpn/", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -97,6 +100,10 @@ assets = [
     { source = "assets/archway-vpn.svg", dest = "/usr/share/icons/hicolor/scalable/apps/archway-vpn.svg", mode = "644" },
     { source = "LICENSE-MIT", dest = "/usr/share/licenses/archway-vpn/LICENSE-MIT", mode = "644", doc = true },
     { source = "LICENSE-APACHE", dest = "/usr/share/licenses/archway-vpn/LICENSE-APACHE", mode = "644", doc = true },
+    # the bundled fonts' licences
+    { source = "assets/fonts/IBM-Plex-OFL.txt", dest = "/usr/share/licenses/archway-vpn/IBM-Plex-OFL.txt", mode = "644", doc = true },
+    { source = "assets/fonts/Lucide-LICENSE.txt", dest = "/usr/share/licenses/archway-vpn/Lucide-LICENSE.txt", mode = "644", doc = true },
+    { source = "assets/fonts/NotoEmoji-OFL.txt", dest = "/usr/share/licenses/archway-vpn/NotoEmoji-OFL.txt", mode = "644", doc = true },
 ]
 
 [package.metadata.generate-rpm.requires]

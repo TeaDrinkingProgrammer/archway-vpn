@@ -36,15 +36,15 @@ impl Field {
     /// The field's label in the editor, for messages that name it.
     pub fn label(self) -> &'static str {
         match self {
-            Field::Name => "Connection name",
+            Field::Name => "Connection Name",
             Field::Description => "Description",
-            Field::Gateway => "Remote gateway",
+            Field::Gateway => "Remote Gateway",
             Field::Username => "Username",
-            Field::SsoPort => "SSO port",
-            Field::IkePort => "IKE UDP port",
+            Field::SsoPort => "SSO Port",
+            Field::IkePort => "IKE UDP Port",
             Field::LocalId => "Local ID",
             Field::CustomRoutes => "Custom routes",
-            Field::IfName => "Interface name",
+            Field::IfName => "Interface Name",
             Field::Uid => "Client UID",
         }
     }
@@ -140,16 +140,20 @@ fn parse_opt<V: FromStr<Err = String>>(s: &str) -> Result<Option<V>, String> {
 #[derive(Clone, Copy, Default)]
 pub struct Look {
     pub hint: &'static str,
+    /// shown in the slot under the field while it has no warning
+    pub help: &'static str,
     pub width: Option<f32>,
     pub multiline: bool,
     pub monospace: bool,
+    /// frameless, in text of this size: the status card's name (semibold) and description
+    pub inline: Option<f32>,
 }
 
 impl Look {
-    pub const PORT: Look = Look { hint: "", width: Some(110.0), multiline: false, monospace: false };
+    pub const PORT: Look = Look { hint: "", help: "", width: Some(120.0), multiline: false, monospace: true, inline: None };
 
     pub const fn hint(hint: &'static str) -> Look {
-        Look { hint, width: None, multiline: false, monospace: false }
+        Look { hint, help: "", width: None, multiline: false, monospace: false, inline: None }
     }
 }
 
@@ -159,29 +163,48 @@ pub const WIDE: f32 = f32::INFINITY;
 /// A column of a fixed `width` (so a field next to it doesn't move): `label` above, what `add` draws, and the
 /// warning `add` returns in the slot below.
 pub fn column<R>(ui: &mut egui::Ui, width: f32, label: &str, add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>)) -> R {
+    column_help(ui, width, label, "", add)
+}
+
+/// `column` with `help` in the slot while there is no warning.
+pub fn column_help<R>(ui: &mut egui::Ui, width: f32, label: &str, help: &str, add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>)) -> R {
     ui.vertical(|ui| {
         ui.set_width(width.min(ui.available_width()));
-        ui.spacing_mut().item_spacing.y = 5.0;
+        ui.spacing_mut().item_spacing.y = 4.0;
         ui.label(crate::theme::caption(ui, label));
         let (r, warning) = add(ui);
-        warning_slot(ui, warning.as_deref());
+        slot(ui, warning.as_deref(), help);
         r
     })
     .inner
 }
 
-/// One line that is always there, so a warning appearing doesn't move what's below it: "⚠ {msg}" in the warning
-/// colour, cut to the line if it's longer (all of it on hover), or nothing. The real ⚠ character, not an icon-font
-/// glyph, so screen readers say it.
-pub fn warning_slot(ui: &mut egui::Ui, msg: Option<&str>) {
+/// One line that is always there, so a warning appearing doesn't move what's below it: "⚠ {msg}" in red, cut to the
+/// line if it's longer (all of it on hover), or `help` in the help colour, or nothing. The real ⚠ character, not an
+/// icon-font glyph, so screen readers say it.
+pub fn slot(ui: &mut egui::Ui, warning: Option<&str>, help: &str) {
     let size = egui::vec2(ui.available_width(), 18.0);
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_min_size(size);
-        if let Some(m) = msg {
-            let text = format!("⚠ {m}");
-            ui.add(egui::Label::new(RichText::new(&text).size(crate::theme::SMALL).color(ui.visuals().warn_fg_color)).truncate()).on_hover_text(text);
+        let t = crate::theme::tokens(ui);
+        let (text, color) = match warning {
+            Some(m) => (format!("⚠ {m}"), t.danger),
+            None => (help.to_owned(), t.weak),
+        };
+        if !text.is_empty() {
+            ui.add(egui::Label::new(RichText::new(&text).size(crate::theme::SMALL).color(color)).truncate()).on_hover_text(text);
         }
     });
+}
+
+/// `slot` without help.
+pub fn warning_slot(ui: &mut egui::Ui, msg: Option<&str>) {
+    slot(ui, msg, "");
+}
+
+/// The id of the text field for `key`, from the field, not from the layout.
+pub fn field_id(key: &DraftKey) -> egui::Id {
+    egui::Id::new(("form-field", key))
 }
 
 /// A text field for `value`: shows the draft for `key` if there is one, else `show(value)`. Edits go through `parse`;
@@ -199,17 +222,30 @@ pub fn text_field<V>(
     let edit = if look.multiline { egui::TextEdit::multiline(&mut text).desired_rows(3) } else { egui::TextEdit::singleline(&mut text) };
     // an id from the field, not from the layout: a warning or problem line appearing elsewhere mustn't make this a
     // new widget, which would take the focus away mid-typing
-    let mut edit = edit.id(egui::Id::new(("form-field", &key))).hint_text(look.hint).margin(egui::Margin::symmetric(10, 8));
+    let mut edit = edit.id(field_id(&key)).hint_text(look.hint).margin(egui::Margin::symmetric(10, 10));
     if let Some(w) = look.width {
         edit = edit.desired_width(w);
     }
     if look.monospace {
         edit = edit.font(egui::TextStyle::Monospace);
     }
+    let t = crate::theme::tokens(ui);
+    if let Some(size) = look.inline {
+        let (font, color) = if size >= 20.0 { (crate::theme::strong_font(ui.ctx(), size), t.text) } else { (egui::FontId::proportional(size), t.weak) };
+        edit = edit.frame(egui::Frame::NONE).margin(egui::Margin::ZERO).font(font).text_color(color);
+    }
     let r = crate::theme::labelled(ui.add(edit), key.1.label());
-    if drafts.error(&key).is_some() {
-        let warn = ui.visuals().warn_fg_color;
-        ui.painter().rect_stroke(r.rect, ui.visuals().widgets.inactive.corner_radius, egui::Stroke::new(1.0, warn), egui::StrokeKind::Inside);
+    if look.inline.is_some() {
+        // a line under it says it can be edited: dashed on hover, solid while editing
+        let y = r.rect.bottom() + 1.0;
+        if r.has_focus() {
+            ui.painter().hline(r.rect.x_range(), y, egui::Stroke::new(2.0, t.focus));
+        } else if r.hovered() {
+            let line = [egui::pos2(r.rect.left(), y), egui::pos2(r.rect.right(), y)];
+            ui.painter().extend(egui::Shape::dashed_line(&line, egui::Stroke::new(1.0, t.weak), 4.0, 3.0));
+        }
+    } else if drafts.error(&key).is_some() {
+        ui.painter().rect_stroke(r.rect, ui.visuals().widgets.inactive.corner_radius, egui::Stroke::new(1.0, t.danger_line), egui::StrokeKind::Inside);
     }
     if r.changed() {
         drafts.edit_with(key.clone(), text, value, parse);
@@ -232,12 +268,12 @@ pub fn parsed_opt<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, drafts:
 
 /// `parsed` in a `column` captioned with the field's label, its error in the slot below.
 pub fn parsed_field<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, width: f32, drafts: &mut Drafts, key: DraftKey, value: &mut V, look: Look) -> egui::Response {
-    column(ui, width, key.1.label(), |ui| (parsed(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
+    column_help(ui, width, key.1.label(), look.help, |ui| (parsed(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
 }
 
 /// `parsed_opt` in a `column`, like `parsed_field`.
 pub fn parsed_opt_field<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, width: f32, drafts: &mut Drafts, key: DraftKey, value: &mut Option<V>, look: Look) -> egui::Response {
-    column(ui, width, key.1.label(), |ui| (parsed_opt(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
+    column_help(ui, width, key.1.label(), look.help, |ui| (parsed_opt(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
 }
 
 #[cfg(test)]
@@ -305,6 +341,10 @@ mod tests {
     fn edit_port(start: u16, events: Vec<egui::Event>) -> (u16, Drafts, Vec<String>) {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
+        // the app's fonts, as egui brings none of its own (no "default_fonts")
+        for _ in 0..2 {
+            ctx.run_ui(Default::default(), |ui| crate::theme::install(ui.ctx())).drop_without_applying_deltas();
+        }
         let mut port = Port::new(start).unwrap();
         let mut drafts = Drafts::default();
         let mut texts = vec![];
@@ -359,6 +399,6 @@ mod tests {
         });
         let nodes = out.platform_output.accesskit_update.take().unwrap().nodes;
         out.drop_without_applying_deltas();
-        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some("IKE UDP port")));
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some("IKE UDP Port")));
     }
 }

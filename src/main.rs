@@ -6,6 +6,7 @@
 mod backend;
 mod charon;
 mod config;
+mod diag;
 mod form;
 mod keyring;
 mod net;
@@ -36,7 +37,7 @@ use std::time::Instant;
 
 /// rustc-style message: "<level>: <headline>" plus a `note` (the cause) and a `help` (what now) line.
 pub fn diag(level: &str, headline: &str, note: &str, help: &str) -> String {
-    format!("{level}: {headline}\n  note: {note}\n  help: {help}")
+    diag::Diag::new(level, headline, note, help).to_string()
 }
 
 const UID_HELP: &str = "Identifies this installation to the FortiGate, like the UID FortiClient generates at install. The app sends it with the SSO login and uses it as the EAP identity. The FortiGate may track devices by it, so only regenerate it if this setup was copied from another machine. Shared connection files don't include it.";
@@ -106,8 +107,11 @@ struct App {
     since: Option<Instant>,
     /// when Connect was clicked; drives the "no answer yet" notice
     connect_started: Option<Instant>,
-    /// when the login link was copied; shows "✔ Copied" for a moment
-    copied_at: Option<Instant>,
+    /// the field a connect error's fix button pointed at; it keeps a ring until the next Connect or another
+    /// connection is selected
+    fix_focus: Option<diag::Fix>,
+    /// scroll to the field `fix_focus` names on the next frame
+    fix_scroll: bool,
     /// SSO login finished in the browser: flash the taskbar entry once (Wayland won't let us raise the window)
     want_attention: bool,
     show_settings: bool,
@@ -156,7 +160,8 @@ impl App {
             info: TunnelInfo::default(),
             since: None,
             connect_started: None,
-            copied_at: None,
+            fix_focus: None,
+            fix_scroll: false,
             want_attention: false,
             show_settings: false,
             confirm_regen: false,
@@ -341,6 +346,7 @@ impl App {
 
     fn connect(&mut self, ctx: &egui::Context) {
         self.error = None;
+        self.fix_focus = None;
         self.info = TunnelInfo::default();
         self.since = None;
         self.connect_started = Some(Instant::now());

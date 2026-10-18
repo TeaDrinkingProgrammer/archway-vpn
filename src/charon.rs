@@ -374,7 +374,7 @@ pub fn explain(log: &[String]) -> String {
     let has = |s: &str| log.iter().any(|l| l.contains(s));
     let (headline, note, help) = if has("but MAC mismatched") {
         // the gateway's AUTH payload: it signed with a key other than ours
-        ("the pre-shared key doesn't match the FortiGate's", "the gateway proved who it is with a different key", "check the key under Connection → Pre-shared key")
+        ("the pre-shared key doesn't match the FortiGate's", "the gateway proved who it is with a different key", "check the key under Connection → Pre-shared Key")
     } else if has("AUTHENTICATION_FAILED") || has("EAP-MS-CHAPv2 failed") || (has("authentication of") && has("failed")) {
         ("the gateway refused the login", "it rejected the SSO token, the username and password, or the pre-shared key", "check the pre-shared key and sign in again")
     } else if has("NO_PROPOSAL_CHOSEN") {
@@ -382,7 +382,7 @@ pub fn explain(log: &[String]) -> String {
     } else if has("TS_UNACCEPTABLE") {
         ("the gateway refused the requested networks", "it didn't accept the traffic selectors", "check Advanced → Network → Routing")
     } else if has("giving up after") || has("retransmit") {
-        ("no answer from the gateway", "nothing came back on the IKE port", "check the remote gateway and Advanced → VPN settings → IKE UDP port")
+        ("no answer from the gateway", "nothing came back on the IKE port", "check the Remote Gateway and Advanced → VPN Settings → IKE UDP Port")
     } else {
         ("the IPsec connection failed", "charon gave no reason this app recognises", "the log has charon's messages")
     };
