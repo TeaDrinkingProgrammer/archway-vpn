@@ -5,9 +5,8 @@ edition = "2024"
 authors = ["Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
 description = "Connect to FortiGate IPsec (IKEv2) VPNs with SAML single sign-on"
 license = "MIT OR Apache-2.0"
-# TODO: change to the Archway repo once it is renamed
-repository = "https://github.com/wilco375/fortisaml-gui"
-homepage = "https://github.com/wilco375/fortisaml-gui"
+repository = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
+homepage = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
 
 [dependencies]
 async-io = "2.6.0"
