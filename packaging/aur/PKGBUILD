@@ -3,7 +3,7 @@
 # Source build for the AUR.
 # Per release: set pkgver to the release tag without its v (tag v0.2.0 -> pkgver=0.2.0), reset pkgrel to 1.
 pkgname=archway-vpn
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='FortiGate IPsec (IKEv2) VPN client with SAML single sign-on, on strongSwan'
 arch=('x86_64')
