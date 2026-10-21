@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # first, so a bad tag fails in seconds and not after the long build
       - name: Tag matches the Cargo.toml version
         run: |
@@ -27,7 +29,6 @@ jobs:
       # the version and components in rust-toolchain.toml
       - name: Install Rust
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: cargo clippy
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: cargo test
@@ -45,7 +46,9 @@ jobs:
     container: docker.io/library/rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          persist-credentials: false
+      # no rust-cache: a release builds from a clean slate, so a poisoned cache can't end up in the packages
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-deb@3.8.0,cargo-generate-rpm@0.21.0
@@ -75,8 +78,9 @@ jobs:
         with:
           name: packages
           path: dist
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: dist/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --verify-tag --generate-notes
