@@ -9,7 +9,11 @@ pub struct NonRootUid(u32);
 
 impl NonRootUid {
     pub fn new(uid: u32) -> Result<Self, String> {
-        if uid == 0 { Err("PKEXEC_UID is 0: refusing to keep running as root".into()) } else { Ok(Self(uid)) }
+        if uid == 0 {
+            Err("PKEXEC_UID is 0: refusing to keep running as root".into())
+        } else {
+            Ok(Self(uid))
+        }
     }
     pub fn get(self) -> u32 {
         self.0
@@ -18,7 +22,8 @@ impl NonRootUid {
 
 /// `PKEXEC_UID` as set by pkexec for the program it runs.
 pub fn pkexec_uid() -> Result<NonRootUid, String> {
-    let v = std::env::var("PKEXEC_UID").map_err(|_| "PKEXEC_UID is not set (not started through pkexec)".to_string())?;
+    let v = std::env::var("PKEXEC_UID")
+        .map_err(|_| "PKEXEC_UID is not set (not started through pkexec)".to_string())?;
     NonRootUid::new(v.parse().map_err(|_| format!("bad PKEXEC_UID {v:?}"))?)
 }
 
@@ -45,13 +50,20 @@ struct CapData {
 /// Switch to `uid` and its primary group, keeping only `KEPT_CAPS`. Must be called while still root.
 pub fn drop_to(uid: NonRootUid) -> Result<(), String> {
     let uid = uid.get();
-    let err = |what: &str| format!("dropping privileges: {what}: {}", std::io::Error::last_os_error());
+    let err = |what: &str| {
+        format!(
+            "dropping privileges: {what}: {}",
+            std::io::Error::last_os_error()
+        )
+    };
     // SAFETY: plain libc calls on our own process; getpwuid_r writes only into the buffers we pass
     unsafe {
         let mut pw: libc::passwd = std::mem::zeroed();
         let mut buf = vec![0 as libc::c_char; 4096];
         let mut res: *mut libc::passwd = std::ptr::null_mut();
-        if libc::getpwuid_r(uid, &mut pw, buf.as_mut_ptr(), buf.len(), &mut res) != 0 || res.is_null() {
+        if libc::getpwuid_r(uid, &mut pw, buf.as_mut_ptr(), buf.len(), &mut res) != 0
+            || res.is_null()
+        {
             return Err(format!("dropping privileges: no user with uid {uid}"));
         }
         let gid = pw.pw_gid;
@@ -68,8 +80,18 @@ pub fn drop_to(uid: NonRootUid) -> Result<(), String> {
         if libc::setresuid(uid, uid, uid) != 0 {
             return Err(err("setresuid"));
         }
-        let mut hdr = CapHeader { version: LINUX_CAPABILITY_VERSION_3, pid: 0 };
-        let data = [CapData { effective: KEPT_CAPS, permitted: KEPT_CAPS, inheritable: 0 }, CapData::default()];
+        let mut hdr = CapHeader {
+            version: LINUX_CAPABILITY_VERSION_3,
+            pid: 0,
+        };
+        let data = [
+            CapData {
+                effective: KEPT_CAPS,
+                permitted: KEPT_CAPS,
+                inheritable: 0,
+            },
+            CapData::default(),
+        ];
         if libc::syscall(libc::SYS_capset, &mut hdr as *mut CapHeader, data.as_ptr()) != 0 {
             return Err(err("capset"));
         }
@@ -109,7 +131,10 @@ mod tests {
 
     #[test]
     fn root_is_not_a_uid_to_drop_to() {
-        assert_eq!(NonRootUid::new(0).unwrap_err(), "PKEXEC_UID is 0: refusing to keep running as root");
+        assert_eq!(
+            NonRootUid::new(0).unwrap_err(),
+            "PKEXEC_UID is 0: refusing to keep running as root"
+        );
         assert_eq!(NonRootUid::new(1000).map(NonRootUid::get), Ok(1000));
     }
 }

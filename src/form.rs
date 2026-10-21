@@ -78,7 +78,13 @@ pub struct Drafts {
 
 impl Drafts {
     /// The user changed the field's text to `text`: update `value` if it parses, remember the text either way.
-    pub fn edit_with<V>(&mut self, key: DraftKey, text: String, value: &mut V, parse: impl FnOnce(&str) -> Result<V, String>) {
+    pub fn edit_with<V>(
+        &mut self,
+        key: DraftKey,
+        text: String,
+        value: &mut V,
+        parse: impl FnOnce(&str) -> Result<V, String>,
+    ) {
         let error = parse(&text).map(|v| *value = v).err();
         self.map.insert(key, Draft { text, error });
     }
@@ -91,7 +97,12 @@ impl Drafts {
 
     /// Like `edit`; empty (or blank) text means None.
     #[cfg(test)]
-    pub fn edit_opt<V: FromStr<Err = String>>(&mut self, key: DraftKey, text: String, value: &mut Option<V>) {
+    pub fn edit_opt<V: FromStr<Err = String>>(
+        &mut self,
+        key: DraftKey,
+        text: String,
+        value: &mut Option<V>,
+    ) {
         self.edit_with(key, text, value, parse_opt)
     }
 
@@ -113,7 +124,9 @@ impl Drafts {
 
     /// Every draft that doesn't parse, with its error.
     pub fn errors(&self) -> impl Iterator<Item = (&DraftKey, &str)> {
-        self.map.iter().filter_map(|(k, d)| Some((k, d.error.as_deref()?)))
+        self.map
+            .iter()
+            .filter_map(|(k, d)| Some((k, d.error.as_deref()?)))
     }
 
     #[cfg(test)]
@@ -133,7 +146,11 @@ impl Drafts {
 }
 
 fn parse_opt<V: FromStr<Err = String>>(s: &str) -> Result<Option<V>, String> {
-    if s.trim().is_empty() { Ok(None) } else { s.parse().map(Some) }
+    if s.trim().is_empty() {
+        Ok(None)
+    } else {
+        s.parse().map(Some)
+    }
 }
 
 /// How a text field looks.
@@ -150,10 +167,24 @@ pub struct Look {
 }
 
 impl Look {
-    pub const PORT: Look = Look { hint: "", help: "", width: Some(120.0), multiline: false, monospace: true, inline: None };
+    pub const PORT: Look = Look {
+        hint: "",
+        help: "",
+        width: Some(120.0),
+        multiline: false,
+        monospace: true,
+        inline: None,
+    };
 
     pub const fn hint(hint: &'static str) -> Look {
-        Look { hint, help: "", width: None, multiline: false, monospace: false, inline: None }
+        Look {
+            hint,
+            help: "",
+            width: None,
+            multiline: false,
+            monospace: false,
+            inline: None,
+        }
     }
 }
 
@@ -162,12 +193,23 @@ pub const WIDE: f32 = f32::INFINITY;
 
 /// A column of a fixed `width` (so a field next to it doesn't move): `label` above, what `add` draws, and the
 /// warning `add` returns in the slot below.
-pub fn column<R>(ui: &mut egui::Ui, width: f32, label: &str, add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>)) -> R {
+pub fn column<R>(
+    ui: &mut egui::Ui,
+    width: f32,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>),
+) -> R {
     column_help(ui, width, label, "", add)
 }
 
 /// `column` with `help` in the slot while there is no warning.
-pub fn column_help<R>(ui: &mut egui::Ui, width: f32, label: &str, help: &str, add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>)) -> R {
+pub fn column_help<R>(
+    ui: &mut egui::Ui,
+    width: f32,
+    label: &str,
+    help: &str,
+    add: impl FnOnce(&mut egui::Ui) -> (R, Option<String>),
+) -> R {
     ui.vertical(|ui| {
         ui.set_width(width.min(ui.available_width()));
         ui.spacing_mut().item_spacing.y = 4.0;
@@ -184,17 +226,25 @@ pub fn column_help<R>(ui: &mut egui::Ui, width: f32, label: &str, help: &str, ad
 /// icon-font glyph, so screen readers say it.
 pub fn slot(ui: &mut egui::Ui, warning: Option<&str>, help: &str) {
     let size = egui::vec2(ui.available_width(), 18.0);
-    ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_min_size(size);
-        let t = crate::theme::tokens(ui);
-        let (text, color) = match warning {
-            Some(m) => (format!("⚠ {m}"), t.danger),
-            None => (help.to_owned(), t.weak),
-        };
-        if !text.is_empty() {
-            ui.add(egui::Label::new(RichText::new(&text).size(crate::theme::SMALL).color(color)).truncate()).on_hover_text(text);
-        }
-    });
+    ui.allocate_ui_with_layout(
+        size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(size);
+            let t = crate::theme::tokens(ui);
+            let (text, color) = match warning {
+                Some(m) => (format!("⚠ {m}"), t.danger),
+                None => (help.to_owned(), t.weak),
+            };
+            if !text.is_empty() {
+                ui.add(
+                    egui::Label::new(RichText::new(&text).size(crate::theme::SMALL).color(color))
+                        .truncate(),
+                )
+                .on_hover_text(text);
+            }
+        },
+    );
 }
 
 /// `slot` without help.
@@ -219,10 +269,17 @@ pub fn text_field<V>(
     parse: impl FnOnce(&str) -> Result<V, String>,
 ) -> egui::Response {
     let mut text = drafts.text(&key).map_or_else(|| show(value), str::to_owned);
-    let edit = if look.multiline { egui::TextEdit::multiline(&mut text).desired_rows(3) } else { egui::TextEdit::singleline(&mut text) };
+    let edit = if look.multiline {
+        egui::TextEdit::multiline(&mut text).desired_rows(3)
+    } else {
+        egui::TextEdit::singleline(&mut text)
+    };
     // an id from the field, not from the layout: a warning or problem line appearing elsewhere mustn't make this a
     // new widget, which would take the focus away mid-typing
-    let mut edit = edit.id(field_id(&key)).hint_text(look.hint).margin(egui::Margin::symmetric(10, 10));
+    let mut edit = edit
+        .id(field_id(&key))
+        .hint_text(look.hint)
+        .margin(egui::Margin::symmetric(10, 10));
     if let Some(w) = look.width {
         edit = edit.desired_width(w);
     }
@@ -231,21 +288,40 @@ pub fn text_field<V>(
     }
     let t = crate::theme::tokens(ui);
     if let Some(size) = look.inline {
-        let (font, color) = if size >= 20.0 { (crate::theme::strong_font(ui.ctx(), size), t.text) } else { (egui::FontId::proportional(size), t.weak) };
-        edit = edit.frame(egui::Frame::NONE).margin(egui::Margin::ZERO).font(font).text_color(color);
+        let (font, color) = if size >= 20.0 {
+            (crate::theme::strong_font(ui.ctx(), size), t.text)
+        } else {
+            (egui::FontId::proportional(size), t.weak)
+        };
+        edit = edit
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::ZERO)
+            .font(font)
+            .text_color(color);
     }
     let r = crate::theme::labelled(ui.add(edit), key.1.label());
     if look.inline.is_some() {
         // a line under it says it can be edited: dashed on hover, solid while editing
         let y = r.rect.bottom() + 1.0;
         if r.has_focus() {
-            ui.painter().hline(r.rect.x_range(), y, egui::Stroke::new(2.0, t.focus));
+            ui.painter()
+                .hline(r.rect.x_range(), y, egui::Stroke::new(2.0, t.focus));
         } else if r.hovered() {
             let line = [egui::pos2(r.rect.left(), y), egui::pos2(r.rect.right(), y)];
-            ui.painter().extend(egui::Shape::dashed_line(&line, egui::Stroke::new(1.0, t.weak), 4.0, 3.0));
+            ui.painter().extend(egui::Shape::dashed_line(
+                &line,
+                egui::Stroke::new(1.0, t.weak),
+                4.0,
+                3.0,
+            ));
         }
     } else if drafts.error(&key).is_some() {
-        ui.painter().rect_stroke(r.rect, ui.visuals().widgets.inactive.corner_radius, egui::Stroke::new(1.0, t.danger_line), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            r.rect,
+            ui.visuals().widgets.inactive.corner_radius,
+            egui::Stroke::new(1.0, t.danger_line),
+            egui::StrokeKind::Inside,
+        );
     }
     if r.changed() {
         drafts.edit_with(key.clone(), text, value, parse);
@@ -257,23 +333,75 @@ pub fn text_field<V>(
 }
 
 /// `text_field` for a type that parses from its own `Display` text.
-pub fn parsed<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, drafts: &mut Drafts, key: DraftKey, value: &mut V, look: Look) -> egui::Response {
-    text_field(ui, drafts, key, value, look, |v| v.to_string(), |s| s.parse())
+pub fn parsed<V: FromStr<Err = String> + Display>(
+    ui: &mut egui::Ui,
+    drafts: &mut Drafts,
+    key: DraftKey,
+    value: &mut V,
+    look: Look,
+) -> egui::Response {
+    text_field(
+        ui,
+        drafts,
+        key,
+        value,
+        look,
+        |v| v.to_string(),
+        |s| s.parse(),
+    )
 }
 
 /// `parsed` for an optional value: an empty field is None.
-pub fn parsed_opt<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, drafts: &mut Drafts, key: DraftKey, value: &mut Option<V>, look: Look) -> egui::Response {
-    text_field(ui, drafts, key, value, look, |v| v.as_ref().map(ToString::to_string).unwrap_or_default(), parse_opt)
+pub fn parsed_opt<V: FromStr<Err = String> + Display>(
+    ui: &mut egui::Ui,
+    drafts: &mut Drafts,
+    key: DraftKey,
+    value: &mut Option<V>,
+    look: Look,
+) -> egui::Response {
+    text_field(
+        ui,
+        drafts,
+        key,
+        value,
+        look,
+        |v| v.as_ref().map(ToString::to_string).unwrap_or_default(),
+        parse_opt,
+    )
 }
 
 /// `parsed` in a `column` captioned with the field's label, its error in the slot below.
-pub fn parsed_field<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, width: f32, drafts: &mut Drafts, key: DraftKey, value: &mut V, look: Look) -> egui::Response {
-    column_help(ui, width, key.1.label(), look.help, |ui| (parsed(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
+pub fn parsed_field<V: FromStr<Err = String> + Display>(
+    ui: &mut egui::Ui,
+    width: f32,
+    drafts: &mut Drafts,
+    key: DraftKey,
+    value: &mut V,
+    look: Look,
+) -> egui::Response {
+    column_help(ui, width, key.1.label(), look.help, |ui| {
+        (
+            parsed(ui, drafts, key.clone(), value, look),
+            drafts.error(&key).map(str::to_owned),
+        )
+    })
 }
 
 /// `parsed_opt` in a `column`, like `parsed_field`.
-pub fn parsed_opt_field<V: FromStr<Err = String> + Display>(ui: &mut egui::Ui, width: f32, drafts: &mut Drafts, key: DraftKey, value: &mut Option<V>, look: Look) -> egui::Response {
-    column_help(ui, width, key.1.label(), look.help, |ui| (parsed_opt(ui, drafts, key.clone(), value, look), drafts.error(&key).map(str::to_owned)))
+pub fn parsed_opt_field<V: FromStr<Err = String> + Display>(
+    ui: &mut egui::Ui,
+    width: f32,
+    drafts: &mut Drafts,
+    key: DraftKey,
+    value: &mut Option<V>,
+    look: Look,
+) -> egui::Response {
+    column_help(ui, width, key.1.label(), look.help, |ui| {
+        (
+            parsed_opt(ui, drafts, key.clone(), value, look),
+            drafts.error(&key).map(str::to_owned),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -291,11 +419,18 @@ mod tests {
         let mut port = Port::new(443).unwrap();
         d.edit(key(Field::IkePort), "0".into(), &mut port);
         assert_eq!(port.get(), 443);
-        assert_eq!(d.error(&key(Field::IkePort)), Some("Port must be 1 to 65535."));
+        assert_eq!(
+            d.error(&key(Field::IkePort)),
+            Some("Port must be 1 to 65535.")
+        );
         assert_eq!(d.text(&key(Field::IkePort)), Some("0"));
         assert!(d.has_errors());
         d.settle(&key(Field::IkePort));
-        assert_eq!(d.text(&key(Field::IkePort)), Some("0"), "an invalid draft stays after focus leaves");
+        assert_eq!(
+            d.text(&key(Field::IkePort)),
+            Some("0"),
+            "an invalid draft stays after focus leaves"
+        );
     }
 
     #[test]
@@ -304,7 +439,11 @@ mod tests {
         let mut port = Port::new(443).unwrap();
         d.edit(key(Field::IkePort), " 8443".into(), &mut port);
         assert_eq!(port.get(), 8443);
-        assert_eq!(d.text(&key(Field::IkePort)), Some(" 8443"), "kept while the field has focus");
+        assert_eq!(
+            d.text(&key(Field::IkePort)),
+            Some(" 8443"),
+            "kept while the field has focus"
+        );
         assert!(!d.has_errors());
         d.settle(&key(Field::IkePort));
         assert_eq!(d.text(&key(Field::IkePort)), None);
@@ -319,7 +458,11 @@ mod tests {
         assert!(!d.has_errors());
         d.edit_opt(key(Field::Gateway), "a b".into(), &mut gw);
         assert_eq!(gw, None, "still the last valid value");
-        assert!(d.error(&key(Field::Gateway)).unwrap().starts_with("Expected a host name"));
+        assert!(
+            d.error(&key(Field::Gateway))
+                .unwrap()
+                .starts_with("Expected a host name")
+        );
     }
 
     #[test]
@@ -330,7 +473,10 @@ mod tests {
         d.edit((DraftOwner::App, Field::SsoPort), "y".into(), &mut b);
         assert_eq!(d.errors().count(), 2);
         d.remove_owner(&DraftOwner::Profile("p1".into()));
-        assert_eq!(d.errors().map(|(k, _)| k.clone()).collect::<Vec<_>>(), [(DraftOwner::App, Field::SsoPort)]);
+        assert_eq!(
+            d.errors().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+            [(DraftOwner::App, Field::SsoPort)]
+        );
         d.remove(&(DraftOwner::App, Field::SsoPort));
         assert!(!d.has_errors());
     }
@@ -343,25 +489,38 @@ mod tests {
         ctx.enable_accesskit();
         // the app's fonts, as egui brings none of its own (no "default_fonts")
         for _ in 0..2 {
-            ctx.run_ui(Default::default(), |ui| crate::theme::install(ui.ctx())).drop_without_applying_deltas();
+            ctx.run_ui(Default::default(), |ui| crate::theme::install(ui.ctx()))
+                .drop_without_applying_deltas();
         }
         let mut port = Port::new(start).unwrap();
         let mut drafts = Drafts::default();
         let mut texts = vec![];
-        let mut run = |port: &mut Port, drafts: &mut Drafts, events: Vec<egui::Event>, focus: bool| {
-            let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
-                let r = parsed_field(ui, WIDE, drafts, key(Field::IkePort), port, Look::PORT);
-                if focus {
-                    r.request_focus();
-                } else {
-                    r.surrender_focus();
+        let mut run =
+            |port: &mut Port, drafts: &mut Drafts, events: Vec<egui::Event>, focus: bool| {
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let r =
+                            parsed_field(ui, WIDE, drafts, key(Field::IkePort), port, Look::PORT);
+                        if focus {
+                            r.request_focus();
+                        } else {
+                            r.surrender_focus();
+                        }
+                    },
+                );
+                if let Some(u) = out.platform_output.accesskit_update.take() {
+                    texts = u
+                        .nodes
+                        .iter()
+                        .filter_map(|(_, n)| n.label().or(n.value()).map(str::to_owned))
+                        .collect();
                 }
-            });
-            if let Some(u) = out.platform_output.accesskit_update.take() {
-                texts = u.nodes.iter().filter_map(|(_, n)| n.label().or(n.value()).map(str::to_owned)).collect();
-            }
-            out.drop_without_applying_deltas();
-        };
+                out.drop_without_applying_deltas();
+            };
         run(&mut port, &mut drafts, vec![], true);
         run(&mut port, &mut drafts, events, true);
         run(&mut port, &mut drafts, vec![], false);
@@ -370,22 +529,39 @@ mod tests {
     }
 
     fn select_all() -> egui::Event {
-        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }
+        egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
     }
 
     #[test]
     fn port_field_takes_a_typed_port() {
-        let (port, drafts, _) = edit_port(443, vec![select_all(), egui::Event::Text("8443".into())]);
+        let (port, drafts, _) =
+            edit_port(443, vec![select_all(), egui::Event::Text("8443".into())]);
         assert_eq!(port, 8443);
-        assert!(drafts.text(&key(Field::IkePort)).is_none(), "settled once focus left");
+        assert!(
+            drafts.text(&key(Field::IkePort)).is_none(),
+            "settled once focus left"
+        );
     }
 
     #[test]
     fn port_field_rejects_too_big_instead_of_clamping() {
         let (port, drafts, texts) = edit_port(443, vec![egui::Event::Text("8443".into())]); // appended: 4438443
         assert_eq!(port, 443);
-        assert_eq!(drafts.text(&key(Field::IkePort)), Some("4438443"), "what the user typed is kept");
-        assert!(texts.iter().any(|t| t == "⚠ Port must be 1 to 65535."), "{texts:?}");
+        assert_eq!(
+            drafts.text(&key(Field::IkePort)),
+            Some("4438443"),
+            "what the user typed is kept"
+        );
+        assert!(
+            texts.iter().any(|t| t == "⚠ Port must be 1 to 65535."),
+            "{texts:?}"
+        );
     }
 
     #[test]
@@ -399,6 +575,11 @@ mod tests {
         });
         let nodes = out.platform_output.accesskit_update.take().unwrap().nodes;
         out.drop_without_applying_deltas();
-        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some("IKE UDP Port")));
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput
+                    && n.label() == Some("IKE UDP Port"))
+        );
     }
 }

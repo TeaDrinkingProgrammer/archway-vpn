@@ -3,7 +3,10 @@
 //! lists that must not be empty are `Vec1`s, so a malformed or hand-crafted request is rejected while it's parsed,
 //! before anything runs as root.
 
-use crate::net::{ClientUid, DhGroup, Host, IfName, Ipv4Net, Keepalive, LocalId, Mtu, Port, Proposal, Secret, Username};
+use crate::net::{
+    ClientUid, DhGroup, Host, IfName, Ipv4Net, Keepalive, LocalId, Mtu, Port, Proposal, Secret,
+    Username,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -29,7 +32,10 @@ impl fmt::Display for EapIdentity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClientAuth {
     /// EAP with this identity and secret (SSO: UID + SAML token; otherwise username + password)
-    Eap { identity: EapIdentity, secret: Secret },
+    Eap {
+        identity: EapIdentity,
+        secret: Secret,
+    },
     /// pre-shared key only, no user authentication
     PskOnly,
 }
@@ -81,26 +87,47 @@ pub struct BackendRequest {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum BackendEvent {
     SamlStart,
-    SamlUrl { url: String },
-    SamlOk { username: String },
-    IkeStart { gateway: Host },
-    Established { ip: Ipv4Addr },
-    TunnelUp { ifname: IfName, ip: Ipv4Addr, routes: Vec<Ipv4Net>, full_tunnel: bool },
+    SamlUrl {
+        url: String,
+    },
+    SamlOk {
+        username: String,
+    },
+    IkeStart {
+        gateway: Host,
+    },
+    Established {
+        ip: Ipv4Addr,
+    },
+    TunnelUp {
+        ifname: IfName,
+        ip: Ipv4Addr,
+        routes: Vec<Ipv4Net>,
+        full_tunnel: bool,
+    },
     Connected,
     Disconnecting,
     Disconnected,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 impl BackendEvent {
     /// The stdout line for this event.
     pub fn to_line(&self) -> String {
-        format!("@@{}", serde_json::to_string(self).expect("events serialize"))
+        format!(
+            "@@{}",
+            serde_json::to_string(self).expect("events serialize")
+        )
     }
 
     /// The event on an `@@` line; None for any other (log) line.
     pub fn from_line(line: &str) -> Option<Result<BackendEvent, String>> {
-        line.strip_prefix("@@").map(|j| serde_json::from_str(j).map_err(|e| format!("unreadable status line from the backend: {e}")))
+        line.strip_prefix("@@").map(|j| {
+            serde_json::from_str(j)
+                .map_err(|e| format!("unreadable status line from the backend: {e}"))
+        })
     }
 }
 
@@ -136,7 +163,8 @@ mod tests {
     #[test]
     fn requests_round_trip() {
         let r = request();
-        let back: BackendRequest = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        let back: BackendRequest =
+            serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(back, r);
     }
 
@@ -153,8 +181,16 @@ mod tests {
         assert!(rejected(&|v| v["esp_proposals"] = json!([])));
         assert!(rejected(&|v| v["dh_groups"] = json!([])));
         assert!(rejected(&|v| v["routes"] = json!({"Custom": []})));
-        assert!(rejected(&|v| v["auth"] = json!({"Eap": {"secret": "tok"}})), "a secret without an identity");
-        assert!(rejected(&|v| v["auth"] = json!({"Eap": {"identity": {"Uid": "0123456789ABCDEF0123456789ABCDEF"}, "secret": ""}})), "empty secret");
+        assert!(
+            rejected(&|v| v["auth"] = json!({"Eap": {"secret": "tok"}})),
+            "a secret without an identity"
+        );
+        assert!(
+            rejected(
+                &|v| v["auth"] = json!({"Eap": {"identity": {"Uid": "0123456789ABCDEF0123456789ABCDEF"}, "secret": ""}})
+            ),
+            "empty secret"
+        );
         assert!(rejected(&|v| v["psk"] = json!("")));
         assert!(rejected(&|v| v["ifname"] = json!("-x")));
     }
@@ -162,35 +198,64 @@ mod tests {
     #[test]
     fn secrets_stay_out_of_debug_output() {
         let s = format!("{:?}", request());
-        assert!(!s.contains("psk-secret") && !s.contains("token-secret"), "{s}");
+        assert!(
+            !s.contains("psk-secret") && !s.contains("token-secret"),
+            "{s}"
+        );
     }
 
     #[test]
     fn routes_overrides() {
         assert_eq!(Routes::Gateway.overrides(), None);
         assert_eq!(Routes::Full.overrides(), Some(vec![Ipv4Net::ALL]));
-        assert_eq!(Routes::Custom(vec1!["10.0.0.0/8".parse().unwrap()]).overrides(), Some(vec!["10.0.0.0/8".parse().unwrap()]));
+        assert_eq!(
+            Routes::Custom(vec1!["10.0.0.0/8".parse().unwrap()]).overrides(),
+            Some(vec!["10.0.0.0/8".parse().unwrap()])
+        );
     }
 
     #[test]
     fn events_round_trip_as_lines() {
         let all = [
             BackendEvent::SamlStart,
-            BackendEvent::SamlUrl { url: "https://idp.example/login".into() },
-            BackendEvent::SamlOk { username: "jane".into() },
-            BackendEvent::IkeStart { gateway: "vpn.example.com".parse().unwrap() },
-            BackendEvent::Established { ip: Ipv4Addr::new(10, 98, 0, 2) },
-            BackendEvent::TunnelUp { ifname: "archway0".parse().unwrap(), ip: Ipv4Addr::new(10, 98, 0, 2), routes: vec![Ipv4Net::ALL], full_tunnel: true },
+            BackendEvent::SamlUrl {
+                url: "https://idp.example/login".into(),
+            },
+            BackendEvent::SamlOk {
+                username: "jane".into(),
+            },
+            BackendEvent::IkeStart {
+                gateway: "vpn.example.com".parse().unwrap(),
+            },
+            BackendEvent::Established {
+                ip: Ipv4Addr::new(10, 98, 0, 2),
+            },
+            BackendEvent::TunnelUp {
+                ifname: "archway0".parse().unwrap(),
+                ip: Ipv4Addr::new(10, 98, 0, 2),
+                routes: vec![Ipv4Net::ALL],
+                full_tunnel: true,
+            },
             BackendEvent::Connected,
             BackendEvent::Disconnecting,
             BackendEvent::Disconnected,
-            BackendEvent::Error { message: "no answer".into() },
+            BackendEvent::Error {
+                message: "no answer".into(),
+            },
         ];
         for ev in all {
             assert_eq!(BackendEvent::from_line(&ev.to_line()), Some(Ok(ev.clone())));
         }
-        assert_eq!(BackendEvent::Connected.to_line(), "@@{\"event\":\"connected\"}");
+        assert_eq!(
+            BackendEvent::Connected.to_line(),
+            "@@{\"event\":\"connected\"}"
+        );
         assert!(BackendEvent::from_line("[*] a log line").is_none());
-        assert!(BackendEvent::from_line("@@{\"event\":\"dns\"}").unwrap().unwrap_err().starts_with("unreadable status line from the backend"));
+        assert!(
+            BackendEvent::from_line("@@{\"event\":\"dns\"}")
+                .unwrap()
+                .unwrap_err()
+                .starts_with("unreadable status line from the backend")
+        );
     }
 }

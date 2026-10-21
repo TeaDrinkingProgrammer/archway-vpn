@@ -46,7 +46,11 @@ fn app_with(store: &MemoryStore) -> App {
 fn file() -> String {
     let paths = Paths::from_env();
     let mut s = std::fs::read_to_string(paths.config_file()).unwrap_or_default();
-    for e in std::fs::read_dir(paths.profiles_dir()).into_iter().flatten().flatten() {
+    for e in std::fs::read_dir(paths.profiles_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         s += &std::fs::read_to_string(e.path()).unwrap_or_default();
     }
     s
@@ -57,7 +61,11 @@ fn first_start_writes_config_and_is_clean() {
     let _t = TempConfig::new();
     let app = app_with(&MemoryStore::default());
     let paths = Paths::from_env();
-    assert!(paths.config_file().exists() && paths.profile_file("New connection").exists() && paths.state_file().exists());
+    assert!(
+        paths.config_file().exists()
+            && paths.profile_file("New connection").exists()
+            && paths.state_file().exists()
+    );
     assert!(!app.unsaved());
     assert!(app.save_error.is_none() && app.keyring_warning.is_none());
 }
@@ -71,7 +79,13 @@ fn save_puts_psk_in_keyring_not_in_file() {
     assert!(app.unsaved());
     app.save();
     assert!(!app.unsaved() && app.save_error.is_none());
-    assert_eq!(store.get(&app.cfg.profiles[0].id, Kind::Psk).unwrap().as_deref(), Some("s3cret"));
+    assert_eq!(
+        store
+            .get(&app.cfg.profiles[0].id, Kind::Psk)
+            .unwrap()
+            .as_deref(),
+        Some("s3cret")
+    );
     assert!(!file().contains("s3cret"));
 }
 
@@ -99,7 +113,13 @@ fn rename_moves_the_file_and_keeps_the_secrets() {
     let paths = Paths::from_env();
     assert!(!paths.profile_file("New connection").exists() && paths.profile_file("Home").exists());
     let app = app_with(&store);
-    assert_eq!((app.cfg.profiles[0].name.as_str(), app.cfg.profiles[0].psk.as_str()), ("Home", "k"));
+    assert_eq!(
+        (
+            app.cfg.profiles[0].name.as_str(),
+            app.cfg.profiles[0].psk.as_str()
+        ),
+        ("Home", "k")
+    );
     assert!(!app.unsaved());
 }
 
@@ -112,9 +132,18 @@ fn duplicate_name_blocks_save() {
     app.cfg.profiles[1].psk = "k".into();
     app.save();
     let err = app.save_error.as_deref().unwrap();
-    assert!(err.starts_with("error: connection \"New connection\" can't be saved\n  note: Another connection already has this name."), "{err}");
+    assert!(
+        err.starts_with(
+            "error: connection \"New connection\" can't be saved\n  note: Another connection already has this name."
+        ),
+        "{err}"
+    );
     assert!(app.unsaved());
-    assert_eq!(store.get(&app.cfg.profiles[1].id, Kind::Psk).unwrap(), None, "nothing saved");
+    assert_eq!(
+        store.get(&app.cfg.profiles[1].id, Kind::Psk).unwrap(),
+        None,
+        "nothing saved"
+    );
 }
 
 #[test]
@@ -122,7 +151,11 @@ fn secrets_of_a_vanished_profile_file_are_deleted_on_save() {
     let _t = TempConfig::new();
     let store = MemoryStore::default();
     let mut app = app_with(&store);
-    app.cfg.profiles.push(Profile { name: "Gone".into(), psk: "k".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Gone".into(),
+        psk: "k".into(),
+        ..Profile::default()
+    });
     app.save();
     let gone = app.cfg.profiles[1].id.clone();
     assert_eq!(store.get(&gone, Kind::Psk).unwrap().as_deref(), Some("k"));
@@ -143,7 +176,11 @@ fn first_start_without_config_dir_keeps_secrets_named_in_state() {
     store.set(&id, Kind::Psk, "l", "k").unwrap();
     let paths = Paths::from_env();
     std::fs::create_dir_all(&paths.state_dir).unwrap();
-    std::fs::write(paths.state_file(), format!(r#"{{"ids":{{"Office":"{id}"}}}}"#)).unwrap();
+    std::fs::write(
+        paths.state_file(),
+        format!(r#"{{"ids":{{"Office":"{id}"}}}}"#),
+    )
+    .unwrap();
     let app = app_with(&store); // first start: also saves
     assert!(app.save_error.is_none(), "{:?}", app.save_error);
     assert_eq!(store.get(&id, Kind::Psk).unwrap().as_deref(), Some("k"));
@@ -157,17 +194,26 @@ fn bad_profile_file_is_reported_at_startup_and_left_alone() {
     std::fs::write(paths.profile_file("Broken"), "gateway = [").unwrap();
     let mut app = app_with(&MemoryStore::default()); // first start: also saves
     let err = app.save_error.clone().unwrap_or_default();
-    assert!(err.starts_with("error: ") && err.contains("Broken.toml couldn't be read"), "{err}");
+    assert!(
+        err.starts_with("error: ") && err.contains("Broken.toml couldn't be read"),
+        "{err}"
+    );
     app.cfg.profiles[0].description = "x".into();
     app.save();
-    assert_eq!(std::fs::read_to_string(paths.profile_file("Broken")).unwrap(), "gateway = [");
+    assert_eq!(
+        std::fs::read_to_string(paths.profile_file("Broken")).unwrap(),
+        "gateway = ["
+    );
 }
 
 #[test]
 fn view_state_and_unsaved_password_are_not_changes() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles.push(Profile { name: "Second".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Second".into(),
+        ..Profile::default()
+    });
     app.save();
     app.cfg.selected = 1;
     app.cfg.show_log = !app.cfg.show_log;
@@ -187,7 +233,11 @@ fn duplicate_ids_in_state_are_fixed_and_saved_separately() {
     std::fs::write(paths.config_file(), "").unwrap(); // not a first start
     std::fs::write(paths.profile_file("A"), "").unwrap();
     std::fs::write(paths.profile_file("B"), "").unwrap();
-    std::fs::write(paths.state_file(), format!(r#"{{"ids":{{"A":"{id}","B":"{id}"}}}}"#)).unwrap();
+    std::fs::write(
+        paths.state_file(),
+        format!(r#"{{"ids":{{"A":"{id}","B":"{id}"}}}}"#),
+    )
+    .unwrap();
     let mut app = app_with(&store);
     let new_id = app.cfg.profiles[1].id.clone();
     assert_ne!(new_id, id);
@@ -201,12 +251,19 @@ fn unwritable_config_shows_error_and_leaves_keyring_alone() {
     let _t = TempConfig::new();
     let store = MemoryStore::default();
     let mut app = app_with(&store);
-    let mut tmp = Paths::from_env().profile_file("New connection").into_os_string();
+    let mut tmp = Paths::from_env()
+        .profile_file("New connection")
+        .into_os_string();
     tmp.push(".tmp");
     std::fs::create_dir(tmp).unwrap(); // blocks the atomic write
     app.cfg.profiles[0].psk = "k".into();
     app.save();
-    assert!(app.save_error.as_deref().unwrap().starts_with("error: the settings couldn't be saved\n  note: "));
+    assert!(
+        app.save_error
+            .as_deref()
+            .unwrap()
+            .starts_with("error: the settings couldn't be saved\n  note: ")
+    );
     assert!(app.unsaved());
     assert_eq!(store.get(&app.cfg.profiles[0].id, Kind::Psk).unwrap(), None);
 }
@@ -214,12 +271,20 @@ fn unwritable_config_shows_error_and_leaves_keyring_alone() {
 #[test]
 fn keyring_failure_shows_error_but_saves_the_file() {
     let _t = TempConfig::new();
-    let store = MemoryStore { fail: Some(Kind::Psk), ..Default::default() };
+    let store = MemoryStore {
+        fail: Some(Kind::Psk),
+        ..Default::default()
+    };
     let mut app = app_with(&store);
     app.cfg.profiles[0].psk = "k".into();
     app.cfg.profiles[0].description = "kept".into();
     app.save();
-    assert!(app.save_error.as_deref().unwrap().starts_with("error: the PSK couldn't be saved to the keyring"));
+    assert!(
+        app.save_error
+            .as_deref()
+            .unwrap()
+            .starts_with("error: the PSK couldn't be saved to the keyring")
+    );
     assert!(app.unsaved());
     assert!(file().contains("kept"));
 }
@@ -228,7 +293,12 @@ fn keyring_failure_shows_error_but_saves_the_file() {
 fn without_keyring_warns_and_saves_file_only() {
     let _t = TempConfig::new();
     let mut app = App::with_keyring(Config::load(), Err(Unavailable::NoService("test".into())));
-    assert!(app.keyring_warning.as_deref().unwrap().starts_with("warning: the PSK and password can't be saved"));
+    assert!(
+        app.keyring_warning
+            .as_deref()
+            .unwrap()
+            .starts_with("warning: the PSK and password can't be saved")
+    );
     app.cfg.profiles[0].psk = "memonly".into();
     app.save();
     assert!(app.save_error.is_none() && !app.unsaved());
@@ -248,28 +318,53 @@ impl Frames {
     fn new() -> Self {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        Self { ctx, tree: vec![], tree_id: egui::accesskit::TreeId::ROOT }
+        Self {
+            ctx,
+            tree: vec![],
+            tree_id: egui::accesskit::TreeId::ROOT,
+        }
     }
 
     /// One frame; returns the viewport commands it sent.
-    fn run(&mut self, app: &mut App, close: bool, events: Vec<egui::Event>) -> Vec<egui::ViewportCommand> {
-        let mut input = egui::RawInput { events, ..Default::default() };
+    fn run(
+        &mut self,
+        app: &mut App,
+        close: bool,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::ViewportCommand> {
+        let mut input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
         if close {
-            input.viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+            input
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .events
+                .push(egui::ViewportEvent::Close);
         }
-        let mut out = self.ctx.run_ui(input, |ui| app.close_guard(&ui.ctx().clone()));
+        let mut out = self
+            .ctx
+            .run_ui(input, |ui| app.close_guard(&ui.ctx().clone()));
         if let Some(u) = out.platform_output.accesskit_update.take() {
             self.tree = u.nodes;
             self.tree_id = u.tree_id;
         }
-        let cmds = out.viewport_output.get(&egui::ViewportId::ROOT).map(|o| o.commands.clone()).unwrap_or_default();
+        let cmds = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|o| o.commands.clone())
+            .unwrap_or_default();
         out.drop_without_applying_deltas();
         cmds
     }
 
     /// Visible texts: button/window labels and label values.
     fn texts(&self) -> impl Iterator<Item = &str> {
-        self.tree.iter().filter_map(|(_, n)| n.label().or(n.value()))
+        self.tree
+            .iter()
+            .filter_map(|(_, n)| n.label().or(n.value()))
     }
 
     fn has(&self, text: &str) -> bool {
@@ -278,8 +373,17 @@ impl Frames {
 
     /// Click the button `label`; returns the commands of that frame.
     fn click(&mut self, app: &mut App, label: &str) -> Vec<egui::ViewportCommand> {
-        let (id, _) = self.tree.iter().find(|(_, n)| n.role() == Role::Button && n.label() == Some(label)).expect(label);
-        let req = ActionRequest { action: Action::Click, target_tree: self.tree_id, target_node: *id, data: None };
+        let (id, _) = self
+            .tree
+            .iter()
+            .find(|(_, n)| n.role() == Role::Button && n.label() == Some(label))
+            .expect(label);
+        let req = ActionRequest {
+            action: Action::Click,
+            target_tree: self.tree_id,
+            target_node: *id,
+            data: None,
+        };
         self.run(app, false, vec![egui::Event::AccessKitActionRequest(req)])
     }
 }
@@ -291,7 +395,10 @@ fn close_without_changes_goes_through() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     let mut f = Frames::new();
-    assert!(!f.run(&mut app, true, vec![]).contains(&egui::ViewportCommand::CancelClose));
+    assert!(
+        !f.run(&mut app, true, vec![])
+            .contains(&egui::ViewportCommand::CancelClose)
+    );
     assert!(!app.confirm_close);
 }
 
@@ -301,7 +408,10 @@ fn close_with_changes_asks_and_cancel_keeps_them() {
     let mut app = app_with(&MemoryStore::default());
     app.cfg.profiles[0].description = "dirty".into();
     let mut f = Frames::new();
-    assert!(f.run(&mut app, true, vec![]).contains(&egui::ViewportCommand::CancelClose));
+    assert!(
+        f.run(&mut app, true, vec![])
+            .contains(&egui::ViewportCommand::CancelClose)
+    );
     f.run(&mut app, false, vec![]);
     assert!(f.has(DIALOG));
     f.click(&mut app, "Cancel");
@@ -317,9 +427,16 @@ fn close_dialog_discard_closes_without_saving() {
     let mut f = Frames::new();
     f.run(&mut app, true, vec![]);
     f.run(&mut app, false, vec![]);
-    assert!(f.click(&mut app, "Discard").contains(&egui::ViewportCommand::Close));
+    assert!(
+        f.click(&mut app, "Discard")
+            .contains(&egui::ViewportCommand::Close)
+    );
     assert!(!file().contains("dirty"));
-    assert!(!f.run(&mut app, true, vec![]).contains(&egui::ViewportCommand::CancelClose), "next close goes through");
+    assert!(
+        !f.run(&mut app, true, vec![])
+            .contains(&egui::ViewportCommand::CancelClose),
+        "next close goes through"
+    );
 }
 
 #[test]
@@ -331,47 +448,105 @@ fn close_dialog_save_saves_and_closes() {
     let mut f = Frames::new();
     f.run(&mut app, true, vec![]);
     f.run(&mut app, false, vec![]);
-    assert!(f.click(&mut app, "Save").contains(&egui::ViewportCommand::Close));
-    assert_eq!(store.get(&app.cfg.profiles[0].id, Kind::Psk).unwrap().as_deref(), Some("k"));
+    assert!(
+        f.click(&mut app, "Save")
+            .contains(&egui::ViewportCommand::Close)
+    );
+    assert_eq!(
+        store
+            .get(&app.cfg.profiles[0].id, Kind::Psk)
+            .unwrap()
+            .as_deref(),
+        Some("k")
+    );
 }
 
 #[test]
 fn close_dialog_save_failure_keeps_dialog_open_with_error() {
     let _t = TempConfig::new();
-    let store = MemoryStore { fail: Some(Kind::Psk), ..Default::default() };
+    let store = MemoryStore {
+        fail: Some(Kind::Psk),
+        ..Default::default()
+    };
     let mut app = app_with(&store);
     app.cfg.profiles[0].psk = "k".into();
     let mut f = Frames::new();
     f.run(&mut app, true, vec![]);
     f.run(&mut app, false, vec![]);
-    assert!(!f.click(&mut app, "Save").contains(&egui::ViewportCommand::Close));
+    assert!(
+        !f.click(&mut app, "Save")
+            .contains(&egui::ViewportCommand::Close)
+    );
     f.run(&mut app, false, vec![]);
     assert!(f.has(DIALOG));
-    assert!(f.texts().any(|t| t.starts_with("error: the PSK couldn't be saved")));
+    assert!(
+        f.texts()
+            .any(|t| t.starts_with("error: the PSK couldn't be saved"))
+    );
 }
 
 // ---- whole window ----
 
 /// One frame of the full app; returns the texts and what was copied to the clipboard.
-fn app_frame(ctx: &egui::Context, app: &mut App, events: Vec<egui::Event>) -> (Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>, Vec<String>) {
+fn app_frame(
+    ctx: &egui::Context,
+    app: &mut App,
+    events: Vec<egui::Event>,
+) -> (
+    Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>,
+    Vec<String>,
+) {
     let mut ef = eframe::Frame::_new_kittest();
-    let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| eframe::App::ui(app, ui, &mut ef));
-    let nodes = out.platform_output.accesskit_update.take().map(|u| u.nodes).unwrap_or_default();
-    let copied = out.platform_output.commands.iter().filter_map(|c| match c {
-        egui::OutputCommand::CopyText(t) => Some(t.clone()),
-        _ => None,
-    }).collect();
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            events,
+            ..Default::default()
+        },
+        |ui| eframe::App::ui(app, ui, &mut ef),
+    );
+    let nodes = out
+        .platform_output
+        .accesskit_update
+        .take()
+        .map(|u| u.nodes)
+        .unwrap_or_default();
+    let copied = out
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
     out.drop_without_applying_deltas();
     (nodes, copied)
 }
 
-fn button<'a>(nodes: &'a [(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str) -> Option<&'a egui::accesskit::Node> {
-    nodes.iter().map(|(_, n)| n).find(|n| n.role() == Role::Button && n.label() == Some(label))
+fn button<'a>(
+    nodes: &'a [(egui::accesskit::NodeId, egui::accesskit::Node)],
+    label: &str,
+) -> Option<&'a egui::accesskit::Node> {
+    nodes
+        .iter()
+        .map(|(_, n)| n)
+        .find(|n| n.role() == Role::Button && n.label() == Some(label))
 }
 
-fn click_event(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str) -> egui::Event {
-    let (id, _) = nodes.iter().find(|(_, n)| n.role() == Role::Button && n.label() == Some(label)).expect(label);
-    egui::Event::AccessKitActionRequest(ActionRequest { action: Action::Click, target_tree: egui::accesskit::TreeId::ROOT, target_node: *id, data: None })
+fn click_event(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    label: &str,
+) -> egui::Event {
+    let (id, _) = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Button && n.label() == Some(label))
+        .expect(label);
+    egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Click,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: *id,
+        data: None,
+    })
 }
 
 #[test]
@@ -395,7 +570,13 @@ fn ctrl_s_saves() {
     let mut app = app_with(&MemoryStore::default());
     app.cfg.profiles[0].description = "dirty".into();
     let ctx = egui::Context::default();
-    let ctrl_s = egui::Event::Key { key: egui::Key::S, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+    let ctrl_s = egui::Event::Key {
+        key: egui::Key::S,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    };
     app_frame(&ctx, &mut app, vec![ctrl_s]);
     assert!(!app.unsaved());
     assert!(file().contains("dirty"));
@@ -425,7 +606,10 @@ fn password_prompt_is_explained_while_elevating() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let explained = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]| {
-        nodes.iter().filter_map(|(_, n)| n.value()).any(|t| t.contains("needs administrator rights"))
+        nodes
+            .iter()
+            .filter_map(|(_, n)| n.value())
+            .any(|t| t.contains("needs administrator rights"))
     };
     app_frame(&ctx, &mut app, vec![]);
     assert!(!explained(&app_frame(&ctx, &mut app, vec![]).0));
@@ -442,13 +626,22 @@ fn finished_sso_login_asks_for_attention() {
     let frame = |app: &mut App| {
         let mut ef = eframe::Frame::_new_kittest();
         let out = ctx.run_ui(Default::default(), |ui| eframe::App::ui(app, ui, &mut ef));
-        let cmds = out.viewport_output.get(&egui::ViewportId::ROOT).map(|o| o.commands.clone()).unwrap_or_default();
+        let cmds = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|o| o.commands.clone())
+            .unwrap_or_default();
         out.drop_without_applying_deltas();
         cmds
     };
-    let attention = egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational);
+    let attention =
+        egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational);
     assert!(!frame(&mut app).contains(&attention));
-    app.tx.send(backend::Event::Backend(BackendEvent::SamlOk { username: "u".into() })).unwrap();
+    app.tx
+        .send(backend::Event::Backend(BackendEvent::SamlOk {
+            username: "u".into(),
+        }))
+        .unwrap();
     assert!(frame(&mut app).contains(&attention));
     assert!(!frame(&mut app).contains(&attention), "only once");
 }
@@ -481,17 +674,35 @@ fn text_glyphs_exist_in_the_app_fonts() {
     let ctx = egui::Context::default();
     for _ in 0..2 {
         // fonts first, then the style that uses them
-        ctx.run_ui(Default::default(), |ui| theme::install(ui.ctx())).drop_without_applying_deltas();
+        ctx.run_ui(Default::default(), |ui| theme::install(ui.ctx()))
+            .drop_without_applying_deltas();
     }
-    let has = |family: egui::FontFamily, c: char| ctx.fonts_mut(|f| f.fonts.font(&family).characters().contains_key(&c));
+    let has = |family: egui::FontFamily, c: char| {
+        ctx.fonts_mut(|f| f.fonts.font(&family).characters().contains_key(&c))
+    };
     let proportional = |c| has(egui::FontFamily::Proportional, c);
     assert!(!proportional('漢'), "the check must catch a missing glyph");
-    for text in ["Browse…", "Connected · 01:02:05", "Delete “Office”?", "⚠ Fix the fields", "—", "Büro Utrecht 😀"] {
+    for text in [
+        "Browse…",
+        "Connected · 01:02:05",
+        "Delete “Office”?",
+        "⚠ Fix the fields",
+        "—",
+        "Büro Utrecht 😀",
+    ] {
         assert!(text.chars().all(proportional), "{text}");
     }
     let icons = egui::FontFamily::Name("icons".into());
     // only lucide.ttf: a glyph missing there would be drawn by the fallback as ◻
-    let lucide = |c: char| ctx.fonts_mut(|f| f.fonts.font(&icons).characters().get(&c).is_some_and(|fonts| fonts.iter().any(|f| f == "lucide")));
+    let lucide = |c: char| {
+        ctx.fonts_mut(|f| {
+            f.fonts
+                .font(&icons)
+                .characters()
+                .get(&c)
+                .is_some_and(|fonts| fonts.iter().any(|f| f == "lucide"))
+        })
+    };
     for (name, glyph) in theme::icon::ALL {
         assert!(glyph.chars().all(lucide), "{name} isn't in lucide.ttf");
     }
@@ -523,7 +734,10 @@ fn settings_is_a_page_with_a_way_back() {
     app_frame(&ctx, &mut app, vec![click_event(&nodes, "Settings")]);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     assert!(button(&nodes, "Regenerate").is_some());
-    assert!(button(&nodes, "Connect").is_none(), "the page replaces the connection view");
+    assert!(
+        button(&nodes, "Connect").is_none(),
+        "the page replaces the connection view"
+    );
     app_frame(&ctx, &mut app, vec![click_event(&nodes, "Back")]);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     assert!(button(&nodes, "Connect").is_some());
@@ -537,7 +751,10 @@ fn connection_buttons_duplicate() {
     ctx.enable_accesskit();
     app_frame(&ctx, &mut app, vec![]);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(button(&nodes, "Delete").is_none(), "the only connection can't be deleted");
+    assert!(
+        button(&nodes, "Delete").is_none(),
+        "the only connection can't be deleted"
+    );
     app_frame(&ctx, &mut app, vec![click_event(&nodes, "Duplicate")]);
     assert_eq!(app.cfg.profiles.len(), 2);
     assert_eq!(app.cfg.selected, 1, "the copy is selected");
@@ -547,12 +764,18 @@ fn connection_buttons_duplicate() {
 
 /// Type an invalid gateway into profile `i` (what the editor does when the text doesn't parse).
 fn type_bad_gateway(app: &mut App, i: usize) {
-    let key = (DraftOwner::Profile(app.cfg.profiles[i].id.clone()), Field::Gateway);
-    app.drafts.edit_opt(key, "vpn example".into(), &mut app.cfg.profiles[i].gateway);
+    let key = (
+        DraftOwner::Profile(app.cfg.profiles[i].id.clone()),
+        Field::Gateway,
+    );
+    app.drafts
+        .edit_opt(key, "vpn example".into(), &mut app.cfg.profiles[i].gateway);
 }
 
 fn label_shown(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> bool {
-    nodes.iter().any(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
+    nodes
+        .iter()
+        .any(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
 }
 
 #[test]
@@ -564,41 +787,79 @@ fn invalid_draft_blocks_save_and_ctrl_s() {
     assert!(app.unsaved());
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    let ctrl_s = egui::Event::Key { key: egui::Key::S, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+    let ctrl_s = egui::Event::Key {
+        key: egui::Key::S,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    };
     app_frame(&ctx, &mut app, vec![ctrl_s]);
     assert!(!file().contains("dirty"), "nothing saved");
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     assert!(button(&nodes, "Save Changes").unwrap().is_disabled());
-    assert!(button(&nodes, "Connect").unwrap().is_disabled(), "the selected profile has the problem");
-    assert!(label_shown(&nodes, "⚠ Expected a host name or IPv4 address, not \"vpn example\"."));
-    let key = (DraftOwner::Profile(app.cfg.profiles[0].id.clone()), Field::Gateway);
-    assert_eq!(app.drafts.text(&key), Some("vpn example"), "what was typed is kept");
+    assert!(
+        button(&nodes, "Connect").unwrap().is_disabled(),
+        "the selected profile has the problem"
+    );
+    assert!(label_shown(
+        &nodes,
+        "⚠ Expected a host name or IPv4 address, not \"vpn example\"."
+    ));
+    let key = (
+        DraftOwner::Profile(app.cfg.profiles[0].id.clone()),
+        Field::Gateway,
+    );
+    assert_eq!(
+        app.drafts.text(&key),
+        Some("vpn example"),
+        "what was typed is kept"
+    );
     app.save();
-    assert!(app.save_error.as_deref().unwrap().contains("Remote Gateway: Expected a host name"), "{:?}", app.save_error);
+    assert!(
+        app.save_error
+            .as_deref()
+            .unwrap()
+            .contains("Remote Gateway: Expected a host name"),
+        "{:?}",
+        app.save_error
+    );
 }
 
 #[test]
 fn invalid_draft_on_another_profile_is_marked() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles.push(Profile { name: "Second".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Second".into(),
+        ..Profile::default()
+    });
     type_bad_gateway(&mut app, 0);
     app.cfg.selected = 1;
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     app_frame(&ctx, &mut app, vec![]);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "⚠ New connection"), "the profile with the problem is marked");
+    assert!(
+        label_shown(&nodes, "⚠ New connection"),
+        "the profile with the problem is marked"
+    );
     assert!(label_shown(&nodes, "Second"));
     assert!(button(&nodes, "Save Changes").unwrap().is_disabled());
-    assert!(!button(&nodes, "Connect").unwrap().is_disabled(), "the selected profile is fine");
+    assert!(
+        !button(&nodes, "Connect").unwrap().is_disabled(),
+        "the selected profile is fine"
+    );
 }
 
 #[test]
 fn deleting_a_profile_drops_its_drafts() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles.push(Profile { name: "Second".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Second".into(),
+        ..Profile::default()
+    });
     type_bad_gateway(&mut app, 1);
     app.cfg.selected = 1;
     let ctx = egui::Context::default();
@@ -608,7 +869,11 @@ fn deleting_a_profile_drops_its_drafts() {
     app_frame(&ctx, &mut app, vec![click_event(&nodes, "Delete")]); // the row's button; the next frame asks
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     assert_eq!(app.cfg.profiles.len(), 2, "not before it's confirmed");
-    app_frame(&ctx, &mut app, vec![click_event(&nodes, "Delete Connection")]);
+    app_frame(
+        &ctx,
+        &mut app,
+        vec![click_event(&nodes, "Delete Connection")],
+    );
     assert_eq!(app.cfg.profiles.len(), 1);
     assert!(!app.drafts.has_errors() && app.problems().is_empty());
 }
@@ -618,9 +883,22 @@ fn empty_custom_routes_block_save() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     app.cfg.profiles[0].network.route_mode = RouteMode::Custom;
-    assert_eq!(app.problems().iter().map(|p| p.message.as_str()).collect::<Vec<_>>(), [config::NO_ROUTES]);
+    assert_eq!(
+        app.problems()
+            .iter()
+            .map(|p| p.message.as_str())
+            .collect::<Vec<_>>(),
+        [config::NO_ROUTES]
+    );
     app.save();
-    assert!(app.save_error.as_deref().unwrap().contains(config::NO_ROUTES), "{:?}", app.save_error);
+    assert!(
+        app.save_error
+            .as_deref()
+            .unwrap()
+            .contains(config::NO_ROUTES),
+        "{:?}",
+        app.save_error
+    );
     assert!(!file().contains("Custom"));
 }
 
@@ -630,12 +908,23 @@ fn close_dialog_cannot_save_with_problems() {
     let mut app = app_with(&MemoryStore::default());
     type_bad_gateway(&mut app, 0);
     let mut f = Frames::new();
-    assert!(f.run(&mut app, true, vec![]).contains(&egui::ViewportCommand::CancelClose), "invalid text counts as a change");
+    assert!(
+        f.run(&mut app, true, vec![])
+            .contains(&egui::ViewportCommand::CancelClose),
+        "invalid text counts as a change"
+    );
     f.run(&mut app, false, vec![]);
     assert!(f.has(DIALOG));
-    let save = f.tree.iter().find(|(_, n)| n.role() == Role::Button && n.label() == Some("Save")).unwrap();
+    let save = f
+        .tree
+        .iter()
+        .find(|(_, n)| n.role() == Role::Button && n.label() == Some("Save"))
+        .unwrap();
     assert!(save.1.is_disabled());
-    assert!(f.click(&mut app, "Discard").contains(&egui::ViewportCommand::Close));
+    assert!(
+        f.click(&mut app, "Discard")
+            .contains(&egui::ViewportCommand::Close)
+    );
 }
 
 #[test]
@@ -643,17 +932,33 @@ fn backend_events_drive_the_status() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     app.state = State::Elevating;
-    app.on_backend(BackendEvent::IkeStart { gateway: "vpn.example.com".parse().unwrap() });
+    app.on_backend(BackendEvent::IkeStart {
+        gateway: "vpn.example.com".parse().unwrap(),
+    });
     assert_eq!(app.state, State::Negotiating);
     let ip = Ipv4Addr::new(10, 98, 0, 2);
-    app.on_backend(BackendEvent::TunnelUp { ifname: "archway0".parse().unwrap(), ip, routes: vec!["10.10.0.0/16".parse().unwrap()], full_tunnel: false });
-    assert_eq!((app.info.ip, app.info.routes.len(), app.info.full_tunnel), (Some(ip), 1, false));
+    app.on_backend(BackendEvent::TunnelUp {
+        ifname: "archway0".parse().unwrap(),
+        ip,
+        routes: vec!["10.10.0.0/16".parse().unwrap()],
+        full_tunnel: false,
+    });
+    assert_eq!(
+        (app.info.ip, app.info.routes.len(), app.info.full_tunnel),
+        (Some(ip), 1, false)
+    );
     app.on_backend(BackendEvent::Connected);
     assert_eq!(app.state, State::Connected);
     let logged = app.log.len();
-    app.on_backend(BackendEvent::Error { message: "no answer".into() });
+    app.on_backend(BackendEvent::Error {
+        message: "no answer".into(),
+    });
     assert_eq!(app.log.len(), logged, "the backend logged it already");
-    assert_eq!(app.error.as_deref(), Some("error: couldn't connect\n  note: no answer\n  help: the log has the details"), "shown like the app's other errors");
+    assert_eq!(
+        app.error.as_deref(),
+        Some("error: couldn't connect\n  note: no answer\n  help: the log has the details"),
+        "shown like the app's other errors"
+    );
 }
 
 #[test]
@@ -661,12 +966,16 @@ fn problems_in_hidden_fields_are_listed_on_screen() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     // the Settings window is closed: the UID field and its warning aren't visible
-    app.drafts.edit((DraftOwner::App, Field::Uid), "x".into(), &mut app.cfg.uid);
+    app.drafts
+        .edit((DraftOwner::App, Field::Uid), "x".into(), &mut app.cfg.uid);
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     app_frame(&ctx, &mut app, vec![]);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "⚠ Settings: Client UID: The client UID must be 32 hexadecimal characters."));
+    assert!(label_shown(
+        &nodes,
+        "⚠ Settings: Client UID: The client UID must be 32 hexadecimal characters."
+    ));
     assert!(button(&nodes, "Connect").unwrap().is_disabled());
 }
 
@@ -674,35 +983,83 @@ fn problems_in_hidden_fields_are_listed_on_screen() {
 fn a_field_the_mode_does_not_use_does_not_block() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    let key = (DraftOwner::Profile(app.cfg.profiles[0].id.clone()), Field::Username);
-    app.drafts.edit_opt(key.clone(), "jané".into(), &mut app.cfg.profiles[0].auth.username);
+    let key = (
+        DraftOwner::Profile(app.cfg.profiles[0].id.clone()),
+        Field::Username,
+    );
+    app.drafts.edit_opt(
+        key.clone(),
+        "jané".into(),
+        &mut app.cfg.profiles[0].auth.username,
+    );
     assert!(app.cfg.profiles[0].sso.enabled);
     assert!(app.problems().is_empty(), "SSO doesn't use the username");
     app.cfg.profiles[0].sso.enabled = false;
-    assert_eq!(app.problems().len(), 1, "it counts again once the username is used");
-    assert_eq!(app.drafts.text(&key), Some("jané"), "what was typed is kept");
+    assert_eq!(
+        app.problems().len(),
+        1,
+        "it counts again once the username is used"
+    );
+    assert_eq!(
+        app.drafts.text(&key),
+        Some("jané"),
+        "what was typed is kept"
+    );
 }
 
 // ---- typing character by character ----
 
 /// One frame; returns the nodes and the focused node.
-fn frame_focus(ctx: &egui::Context, app: &mut App, events: Vec<egui::Event>) -> (Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>, Option<egui::accesskit::NodeId>) {
+fn frame_focus(
+    ctx: &egui::Context,
+    app: &mut App,
+    events: Vec<egui::Event>,
+) -> (
+    Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>,
+    Option<egui::accesskit::NodeId>,
+) {
     let mut ef = eframe::Frame::_new_kittest();
-    let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| eframe::App::ui(app, ui, &mut ef));
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            events,
+            ..Default::default()
+        },
+        |ui| eframe::App::ui(app, ui, &mut ef),
+    );
     let u = out.platform_output.accesskit_update.take().unwrap();
     out.drop_without_applying_deltas();
     (u.nodes, Some(u.focus))
 }
 
-fn field_node(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], f: Field) -> (egui::accesskit::NodeId, egui::accesskit::Node) {
-    nodes.iter().find(|(_, n)| matches!(n.role(), Role::TextInput | Role::MultilineTextInput) && n.label() == Some(f.label())).cloned().unwrap_or_else(|| panic!("no field {}", f.label()))
+fn field_node(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    f: Field,
+) -> (egui::accesskit::NodeId, egui::accesskit::Node) {
+    nodes
+        .iter()
+        .find(|(_, n)| {
+            matches!(n.role(), Role::TextInput | Role::MultilineTextInput)
+                && n.label() == Some(f.label())
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("no field {}", f.label()))
 }
 
 /// Focus field `f` and type `text` one character per frame; after each frame the field must still have the focus.
-fn type_slowly(ctx: &egui::Context, app: &mut App, f: Field, text: &str) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+fn type_slowly(
+    ctx: &egui::Context,
+    app: &mut App,
+    f: Field,
+    text: &str,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let (nodes, _) = frame_focus(ctx, app, vec![]);
     let (id, _) = field_node(&nodes, f);
-    let focus = egui::Event::AccessKitActionRequest(ActionRequest { action: Action::Focus, target_tree: egui::accesskit::TreeId::ROOT, target_node: id, data: None });
+    let focus = egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Focus,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: id,
+        data: None,
+    });
     frame_focus(ctx, app, vec![focus]);
     let mut nodes = vec![];
     let mut typed = String::new();
@@ -710,7 +1067,12 @@ fn type_slowly(ctx: &egui::Context, app: &mut App, f: Field, text: &str) -> Vec<
         typed.push(c);
         let (n, focused) = frame_focus(ctx, app, vec![egui::Event::Text(c.to_string())]);
         let (now, _) = field_node(&n, f);
-        assert_eq!(focused, Some(now), "{} lost the focus after typing {typed:?}", f.label());
+        assert_eq!(
+            focused,
+            Some(now),
+            "{} lost the focus after typing {typed:?}",
+            f.label()
+        );
         nodes = n;
     }
     nodes
@@ -727,10 +1089,18 @@ fn typing_an_invalid_gateway_keeps_focus_and_the_label_above_the_field() {
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
     let (_, field) = field_node(&nodes, Field::Gateway);
     assert_eq!(field.value(), Some("vpn example"));
-    let label = nodes.iter().find(|(_, n)| n.role() == Role::Label && n.value() == Some("Remote Gateway")).unwrap().1.clone();
+    let label = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Label && n.value() == Some("Remote Gateway"))
+        .unwrap()
+        .1
+        .clone();
     let lb = label.bounds().unwrap();
     let fb = field.bounds().unwrap();
-    assert!(lb.y1 <= fb.y0 && fb.y0 - lb.y1 < 12.0 && (lb.x0 - fb.x0).abs() < 1.0, "label at {lb:?} isn't right above the field at {fb:?}");
+    assert!(
+        lb.y1 <= fb.y0 && fb.y0 - lb.y1 < 12.0 && (lb.x0 - fb.x0).abs() < 1.0,
+        "label at {lb:?} isn't right above the field at {fb:?}"
+    );
 }
 
 #[test]
@@ -742,10 +1112,26 @@ fn typing_a_custom_route_is_not_reformatted_halfway() {
     ctx.enable_accesskit();
     frame_focus(&ctx, &mut app, vec![]);
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
-    let net = nodes.iter().find(|(_, n)| n.role() == Role::Button && n.label() == Some("Network")).unwrap().0;
-    frame_focus(&ctx, &mut app, vec![egui::Event::AccessKitActionRequest(ActionRequest { action: Action::Click, target_tree: egui::accesskit::TreeId::ROOT, target_node: net, data: None })]);
+    let net = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Button && n.label() == Some("Network"))
+        .unwrap()
+        .0;
+    frame_focus(
+        &ctx,
+        &mut app,
+        vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: net,
+            data: None,
+        })],
+    );
     type_slowly(&ctx, &mut app, Field::CustomRoutes, "10.0.0.0/8");
-    assert_eq!(app.cfg.profiles[0].network.custom_routes, ["10.0.0.0/8".parse::<net::Ipv4Net>().unwrap()]);
+    assert_eq!(
+        app.cfg.profiles[0].network.custom_routes,
+        ["10.0.0.0/8".parse::<net::Ipv4Net>().unwrap()]
+    );
 }
 
 #[test]
@@ -753,20 +1139,32 @@ fn an_older_file_format_counts_as_a_change_until_saved() {
     let _t = TempConfig::new();
     let paths = Paths::from_env();
     std::fs::create_dir_all(paths.profiles_dir()).unwrap();
-    std::fs::write(paths.profile_file("Old"), "[network]\ncustom_routes = \"\"\n").unwrap();
+    std::fs::write(
+        paths.profile_file("Old"),
+        "[network]\ncustom_routes = \"\"\n",
+    )
+    .unwrap();
     // not a first start (that saves straight away)
-    std::fs::write(paths.config_file(), "uid = \"0123456789ABCDEF0123456789ABCDEF\"\n").unwrap();
+    std::fs::write(
+        paths.config_file(),
+        "uid = \"0123456789ABCDEF0123456789ABCDEF\"\n",
+    )
+    .unwrap();
     let mut app = app_with(&MemoryStore::default());
     assert!(app.unsaved(), "Save is offered for the old file");
     app.save();
     assert_eq!(app.save_error, None);
     assert!(!app.unsaved());
-    assert_eq!(std::fs::read_to_string(paths.profile_file("Old")).unwrap(), "");
+    assert_eq!(
+        std::fs::read_to_string(paths.profile_file("Old")).unwrap(),
+        ""
+    );
 }
 
 #[test]
 fn window_icon_decodes() {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/archway-vpn-256.png")).unwrap();
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/archway-vpn-256.png")).unwrap();
     assert_eq!((icon.width, icon.height), (256, 256));
 }
 
@@ -775,7 +1173,8 @@ fn theme_installs_before_the_first_frame() {
     // what main() does in eframe's creation callback, before any frame has run
     let ctx = egui::Context::default();
     theme::install(&ctx);
-    ctx.run_ui(Default::default(), |ui| theme::install(ui.ctx())).drop_without_applying_deltas();
+    ctx.run_ui(Default::default(), |ui| theme::install(ui.ctx()))
+        .drop_without_applying_deltas();
 }
 
 #[test]
@@ -783,7 +1182,10 @@ fn a_problem_does_not_move_the_page() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     // two connections: the selected row shows all three buttons (Duplicate, Share, Delete)
-    app.cfg.profiles.push(Profile { name: "Second".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Second".into(),
+        ..Profile::default()
+    });
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     // fonts, then style: the layout is final from the third frame on
@@ -792,11 +1194,19 @@ fn a_problem_does_not_move_the_page() {
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     let before = field_node(&nodes, Field::Gateway).1.bounds();
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert_eq!(field_node(&nodes, Field::Gateway).1.bounds(), before, "the layout is stable without changes");
+    assert_eq!(
+        field_node(&nodes, Field::Gateway).1.bounds(),
+        before,
+        "the layout is stable without changes"
+    );
     // the Settings page is closed: the problem only shows in the status card
-    app.drafts.edit((DraftOwner::App, Field::Uid), "x".into(), &mut app.cfg.uid);
+    app.drafts
+        .edit((DraftOwner::App, Field::Uid), "x".into(), &mut app.cfg.uid);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "⚠ Settings: Client UID: The client UID must be 32 hexadecimal characters."));
+    assert!(label_shown(
+        &nodes,
+        "⚠ Settings: Client UID: The client UID must be 32 hexadecimal characters."
+    ));
     assert_eq!(field_node(&nodes, Field::Gateway).1.bounds(), before);
 }
 
@@ -804,16 +1214,26 @@ fn a_problem_does_not_move_the_page() {
 fn hovering_a_button_does_not_move_the_others() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles.push(Profile { name: "Second".into(), ..Profile::default() });
+    app.cfg.profiles.push(Profile {
+        name: "Second".into(),
+        ..Profile::default()
+    });
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     for _ in 0..3 {
         app_frame(&ctx, &mut app, vec![]);
     }
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    let bounds = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str| button(nodes, label).and_then(|n| n.bounds()).unwrap();
+    let bounds = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str| {
+        button(nodes, label).and_then(|n| n.bounds()).unwrap()
+    };
     // frameless buttons: top bar, the selected row's buttons
-    for (hover, watch) in [("Settings", "Log"), ("Log", "Settings"), ("Delete", "Duplicate"), ("Duplicate", "Share")] {
+    for (hover, watch) in [
+        ("Settings", "Log"),
+        ("Log", "Settings"),
+        ("Delete", "Duplicate"),
+        ("Duplicate", "Share"),
+    ] {
         let (h, w) = (bounds(&nodes, hover), bounds(&nodes, watch));
         let at = egui::pos2(((h.x0 + h.x1) / 2.0) as f32, ((h.y0 + h.y1) / 2.0) as f32);
         app_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
@@ -833,13 +1253,20 @@ fn a_field_warning_does_not_move_what_is_below() {
         app_frame(&ctx, &mut app, vec![]);
     }
     let psk = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]| {
-        nodes.iter().find(|(_, n)| n.role() == Role::PasswordInput && n.label() == Some("Pre-shared Key")).and_then(|(_, n)| n.bounds()).unwrap()
+        nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::PasswordInput && n.label() == Some("Pre-shared Key"))
+            .and_then(|(_, n)| n.bounds())
+            .unwrap()
     };
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
     let before = psk(&nodes);
     type_bad_gateway(&mut app, 0);
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "⚠ Expected a host name or IPv4 address, not \"vpn example\"."));
+    assert!(label_shown(
+        &nodes,
+        "⚠ Expected a host name or IPv4 address, not \"vpn example\"."
+    ));
     assert_eq!(psk(&nodes), before);
 }
 
@@ -848,7 +1275,11 @@ fn the_log_draws_only_the_lines_in_view() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
     app.push_log("error: first\n  note: second".into());
-    assert_eq!(app.log[app.log.len() - 2..], ["error: first", "  note: second"], "one row per line");
+    assert_eq!(
+        app.log[app.log.len() - 2..],
+        ["error: first", "  note: second"],
+        "one row per line"
+    );
     for i in 0..3000 {
         app.push_log(format!("line {i}"));
     }
@@ -859,7 +1290,10 @@ fn the_log_draws_only_the_lines_in_view() {
         app_frame(&ctx, &mut app, vec![]);
     }
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    let drawn = nodes.iter().filter(|(_, n)| n.value().is_some_and(|v| v.starts_with("line "))).count();
+    let drawn = nodes
+        .iter()
+        .filter(|(_, n)| n.value().is_some_and(|v| v.starts_with("line ")))
+        .count();
     assert!(drawn > 0 && drawn < 100, "{drawn} log lines laid out");
 }
 
@@ -869,22 +1303,52 @@ fn fix_button_focuses_the_field_and_clears_on_another_connection() {
     let mut app = app_with(&MemoryStore::default());
     app.add_profile(Profile::default());
     app.cfg.selected = 0;
-    app.error = Some(diag("error", "can't connect without a pre-shared key", "the FortiGate proves who it is with it", "enter it"));
+    app.error = Some(diag(
+        "error",
+        "can't connect without a pre-shared key",
+        "the FortiGate proves who it is with it",
+        "enter it",
+    ));
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     frame_focus(&ctx, &mut app, vec![]);
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "Can't connect without a pre-shared key"));
-    frame_focus(&ctx, &mut app, vec![click_event(&nodes, "Enter Pre-shared Key")]);
+    assert!(label_shown(
+        &nodes,
+        "Can't connect without a pre-shared key"
+    ));
+    frame_focus(
+        &ctx,
+        &mut app,
+        vec![click_event(&nodes, "Enter Pre-shared Key")],
+    );
     let (nodes, focus) = frame_focus(&ctx, &mut app, vec![]);
     assert!(app.error.is_none(), "the banner closes");
     assert_eq!(app.fix_focus, Some(diag::Fix::Psk));
-    let psk = nodes.iter().find(|(_, n)| n.role() == Role::PasswordInput && n.label() == Some("Pre-shared Key")).unwrap().0;
+    let psk = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::PasswordInput && n.label() == Some("Pre-shared Key"))
+        .unwrap()
+        .0;
     assert_eq!(focus, Some(psk), "the pre-shared key field has the focus");
-    assert!(label_shown(&nodes, "Enter it here, then Save and connect again."));
+    assert!(label_shown(
+        &nodes,
+        "Enter it here, then Save and connect again."
+    ));
     let second = app.cfg.profiles[1].name.to_string();
-    let row = nodes.iter().find(|(_, n)| n.label() == Some(second.as_str()) && !matches!(n.role(), Role::Label | Role::TextInput)).expect("second row").0;
-    let click = egui::Event::AccessKitActionRequest(ActionRequest { action: Action::Click, target_tree: egui::accesskit::TreeId::ROOT, target_node: row, data: None });
+    let row = nodes
+        .iter()
+        .find(|(_, n)| {
+            n.label() == Some(second.as_str()) && !matches!(n.role(), Role::Label | Role::TextInput)
+        })
+        .expect("second row")
+        .0;
+    let click = egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Click,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: row,
+        data: None,
+    });
     frame_focus(&ctx, &mut app, vec![click]);
     assert_eq!(app.cfg.selected, 1);
     assert_eq!(app.fix_focus, None, "another connection clears the pointer");
@@ -901,22 +1365,44 @@ fn long_names_truncate_without_moving_the_buttons() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let (nodes, _) = sized_frames(&mut app, &ctx, egui::vec2(900.0, 700.0), 3, vec![]);
-        let b = |label: &str| button(&nodes, label).unwrap_or_else(|| panic!("{label}")).bounds().unwrap();
+        let b = |label: &str| {
+            button(&nodes, label)
+                .unwrap_or_else(|| panic!("{label}"))
+                .bounds()
+                .unwrap()
+        };
         (b("Connect"), b("Duplicate"))
     };
     let short = connect_rect("Office");
     let long = connect_rect("Very long connection name that keeps going on and on");
-    assert_eq!(short, long, "Connect and the row buttons stay where they are");
+    assert_eq!(
+        short, long,
+        "Connect and the row buttons stay where they are"
+    );
 }
 
 /// Frames of the full app in a `w`×`h` window; the last frame's nodes and focus.
-fn sized_frames(app: &mut App, ctx: &egui::Context, size: egui::Vec2, n: usize, mut events: Vec<egui::Event>) -> (Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>, egui::accesskit::NodeId) {
+fn sized_frames(
+    app: &mut App,
+    ctx: &egui::Context,
+    size: egui::Vec2,
+    n: usize,
+    mut events: Vec<egui::Event>,
+) -> (
+    Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>,
+    egui::accesskit::NodeId,
+) {
     let mut ef = eframe::Frame::_new_kittest();
     let mut last = (vec![], egui::accesskit::NodeId(0));
     for _ in 0..n {
         // a quarter second per frame, so animations (scrolling) finish
         let time = Some(ctx.input(|i| i.time) + 0.25);
-        let input = egui::RawInput { time, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), events: std::mem::take(&mut events), ..Default::default() };
+        let input = egui::RawInput {
+            time,
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events: std::mem::take(&mut events),
+            ..Default::default()
+        };
         let mut out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut ef));
         if let Some(u) = out.platform_output.accesskit_update.take() {
             last = (u.nodes, u.focus);
@@ -936,10 +1422,28 @@ fn stat_cards_fit_the_default_window() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let (nodes, _) = sized_frames(&mut app, &ctx, egui::vec2(1000.0, 760.0), 3, vec![]);
-    let sent = nodes.iter().find(|(_, n)| n.value() == Some("Bytes Sent")).expect("Bytes Sent").1.bounds().unwrap();
-    let copy = button(&nodes, "Copy IP Address").expect("copy button").bounds().unwrap();
-    let ip = nodes.iter().find(|(_, n)| n.value() == Some("10.212.134.200")).expect("ip").1.bounds().unwrap();
-    assert!(sent.x1 <= 1000.0 - 24.0 && copy.x1 <= 1000.0 - 24.0 && ip.x1 <= copy.x0, "a stat card runs off the window: {sent:?} {copy:?}");
+    let sent = nodes
+        .iter()
+        .find(|(_, n)| n.value() == Some("Bytes Sent"))
+        .expect("Bytes Sent")
+        .1
+        .bounds()
+        .unwrap();
+    let copy = button(&nodes, "Copy IP Address")
+        .expect("copy button")
+        .bounds()
+        .unwrap();
+    let ip = nodes
+        .iter()
+        .find(|(_, n)| n.value() == Some("10.212.134.200"))
+        .expect("ip")
+        .1
+        .bounds()
+        .unwrap();
+    assert!(
+        sent.x1 <= 1000.0 - 24.0 && copy.x1 <= 1000.0 - 24.0 && ip.x1 <= copy.x0,
+        "a stat card runs off the window: {sent:?} {copy:?}"
+    );
 }
 
 #[test]
@@ -948,14 +1452,34 @@ fn fix_button_scrolls_the_field_into_view() {
     let mut app = app_with(&MemoryStore::default());
     app.cfg.profiles[0].sso.enabled = false;
     app.cfg.show_log = true;
-    app.error = Some(diag("error", "can't connect without a username and password", "with SSO off, this connection signs in with them", "enter them"));
+    app.error = Some(diag(
+        "error",
+        "can't connect without a username and password",
+        "with SSO off, this connection signs in with them",
+        "enter them",
+    ));
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let size = egui::vec2(760.0, 520.0);
     let (nodes, _) = sized_frames(&mut app, &ctx, size, 3, vec![]);
-    let (nodes, focus) = sized_frames(&mut app, &ctx, size, 4, vec![click_event(&nodes, "Enter Username and Password")]);
-    let field = nodes.iter().find(|(id, _)| *id == focus).expect("focused node").1.bounds().unwrap();
-    assert!(field.y0 >= 0.0 && field.y1 <= 520.0 - 210.0, "the username field is out of view: {field:?}");
+    let (nodes, focus) = sized_frames(
+        &mut app,
+        &ctx,
+        size,
+        4,
+        vec![click_event(&nodes, "Enter Username and Password")],
+    );
+    let field = nodes
+        .iter()
+        .find(|(id, _)| *id == focus)
+        .expect("focused node")
+        .1
+        .bounds()
+        .unwrap();
+    assert!(
+        field.y0 >= 0.0 && field.y1 <= 520.0 - 210.0,
+        "the username field is out of view: {field:?}"
+    );
 }
 
 #[test]
@@ -966,20 +1490,48 @@ fn the_title_edits_the_name_and_shows_what_is_typed() {
     ctx.enable_accesskit();
     frame_focus(&ctx, &mut app, vec![]);
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
-    let title = nodes.iter().find(|(_, n)| n.role() == Role::TextInput && n.label() == Some("Connection Name")).expect("an editable title").0;
-    let focus = egui::Event::AccessKitActionRequest(ActionRequest { action: Action::Focus, target_tree: egui::accesskit::TreeId::ROOT, target_node: title, data: None });
+    let title = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::TextInput && n.label() == Some("Connection Name"))
+        .expect("an editable title")
+        .0;
+    let focus = egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Focus,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: title,
+        data: None,
+    });
     frame_focus(&ctx, &mut app, vec![focus]);
     frame_focus(&ctx, &mut app, vec![egui::Event::Text("X".into())]);
     assert_eq!(app.cfg.profiles[0].name.as_str(), "New connectionX");
     // an empty name doesn't parse: the field keeps the text, and so does the title
-    let key = (DraftOwner::Profile(app.cfg.profiles[0].id.clone()), Field::Name);
-    app.drafts.edit(key, String::new(), &mut app.cfg.profiles[0].name);
+    let key = (
+        DraftOwner::Profile(app.cfg.profiles[0].id.clone()),
+        Field::Name,
+    );
+    app.drafts
+        .edit(key, String::new(), &mut app.cfg.profiles[0].name);
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
-    let title = nodes.iter().find(|(_, n)| n.label() == Some("Connection Name")).unwrap().1.clone();
-    assert_eq!(title.value(), Some(""), "the title shows the empty name, not the last valid one");
+    let title = nodes
+        .iter()
+        .find(|(_, n)| n.label() == Some("Connection Name"))
+        .unwrap()
+        .1
+        .clone();
+    assert_eq!(
+        title.value(),
+        Some(""),
+        "the title shows the empty name, not the last valid one"
+    );
     let old = |s: Option<&str>| s.is_some_and(|s| s.contains("New connectionX"));
-    assert!(!nodes.iter().any(|(_, n)| old(n.label()) || old(n.value())), "nothing still shows the old name");
-    assert!(label_shown(&nodes, "⚠ Unnamed connection"), "the list row says it has no name");
+    assert!(
+        !nodes.iter().any(|(_, n)| old(n.label()) || old(n.value())),
+        "nothing still shows the old name"
+    );
+    assert!(
+        label_shown(&nodes, "⚠ Unnamed connection"),
+        "the list row says it has no name"
+    );
 }
 
 /// How soon the app asks to be drawn again after a frame in `state`.
@@ -992,8 +1544,13 @@ fn repaint_delay_in(state: State) -> std::time::Duration {
     let mut ef = eframe::Frame::_new_kittest();
     let mut delay = std::time::Duration::MAX;
     for _ in 0..4 {
-        let out = ctx.run_ui(Default::default(), |ui| eframe::App::ui(&mut app, ui, &mut ef));
-        delay = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(std::time::Duration::MAX, |v| v.repaint_delay);
+        let out = ctx.run_ui(Default::default(), |ui| {
+            eframe::App::ui(&mut app, ui, &mut ef)
+        });
+        delay = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(std::time::Duration::MAX, |v| v.repaint_delay);
         out.drop_without_applying_deltas();
     }
     delay
@@ -1015,11 +1572,23 @@ fn name_and_description_are_edited_in_one_place_the_status_card() {
     ctx.enable_accesskit();
     frame_focus(&ctx, &mut app, vec![]);
     let (nodes, _) = frame_focus(&ctx, &mut app, vec![]);
-    let card = nodes.iter().find(|(_, n)| n.role() == Role::Label && n.value() == Some("Connection")).expect("Connection card").1.bounds().unwrap();
+    let card = nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Label && n.value() == Some("Connection"))
+        .expect("Connection card")
+        .1
+        .bounds()
+        .unwrap();
     for f in [Field::Name, Field::Description] {
-        let editors: Vec<_> = nodes.iter().filter(|(_, n)| n.role() == Role::TextInput && n.label() == Some(f.label())).collect();
+        let editors: Vec<_> = nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::TextInput && n.label() == Some(f.label()))
+            .collect();
         assert_eq!(editors.len(), 1, "one editor for {}", f.label());
-        assert!(editors[0].1.bounds().unwrap().y1 < card.y0, "{} is edited in the status card", f.label());
+        assert!(
+            editors[0].1.bounds().unwrap().y1 < card.y0,
+            "{} is edited in the status card",
+            f.label()
+        );
     }
 }
-

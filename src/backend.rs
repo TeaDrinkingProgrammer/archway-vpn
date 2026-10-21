@@ -44,7 +44,12 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn start(cfg: &Config, profile: &Profile, tx: Sender<Event>, ctx: eframe::egui::Context) -> Session {
+    pub fn start(
+        cfg: &Config,
+        profile: &Profile,
+        tx: Sender<Event>,
+        ctx: eframe::egui::Context,
+    ) -> Session {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let cancel = Arc::new(AtomicBool::new(false));
         let (cfg, profile) = (cfg.clone(), profile.clone());
@@ -61,7 +66,11 @@ impl Session {
             }
             send(Event::Finished);
         });
-        Session { shared, cancel, thread: Some(thread) }
+        Session {
+            shared,
+            cancel,
+            thread: Some(thread),
+        }
     }
 
     pub fn disconnect(&self) {
@@ -84,9 +93,10 @@ impl Session {
         }
         self.shared.lock().unwrap().backend_stdin.take(); // EOF => backend tears down regardless
         if let Some(t) = self.thread.take()
-            && t.is_finished() {
-                let _ = t.join();
-            }
+            && t.is_finished()
+        {
+            let _ = t.join();
+        }
     }
 }
 
@@ -96,14 +106,32 @@ fn missing(what: &str, why: &str, help: &str) -> String {
 }
 
 fn no_token() -> String {
-    crate::diag("error", "the SSO login gave no token", "the login page finished without handing one over", "connect again and sign in once more")
+    crate::diag(
+        "error",
+        "the SSO login gave no token",
+        "the login page finished without handing one over",
+        "connect again and sign in once more",
+    )
 }
 
 /// How profile `p` authenticates: SSO -> (UID, SAML token), EAP login -> (username, password), else PSK only.
-pub fn client_auth(cfg: &Config, p: &Profile, sso_token: Option<Secret>) -> Result<ClientAuth, String> {
-    let missing = || missing("a username and password", "with SSO off, this connection signs in with them", "enter them under Sign-in, or turn on Single Sign On");
+pub fn client_auth(
+    cfg: &Config,
+    p: &Profile,
+    sso_token: Option<Secret>,
+) -> Result<ClientAuth, String> {
+    let missing = || {
+        missing(
+            "a username and password",
+            "with SSO off, this connection signs in with them",
+            "enter them under Sign-in, or turn on Single Sign On",
+        )
+    };
     match (p.sso.enabled, p.auth.mode) {
-        (true, _) => Ok(ClientAuth::Eap { identity: EapIdentity::Uid(cfg.uid), secret: sso_token.ok_or_else(no_token)? }),
+        (true, _) => Ok(ClientAuth::Eap {
+            identity: EapIdentity::Uid(cfg.uid),
+            secret: sso_token.ok_or_else(no_token)?,
+        }),
         (false, UserAuth::Eap) => {
             let identity = EapIdentity::User(p.auth.username.clone().ok_or_else(missing)?);
             let secret = Secret::new(p.auth.password.clone()).map_err(|_| missing())?;
@@ -115,26 +143,50 @@ pub fn client_auth(cfg: &Config, p: &Profile, sso_token: Option<Secret>) -> Resu
 
 /// The backend request for profile `p`. The profile's types already guarantee valid values; this refuses what's
 /// missing.
-pub fn build_request(cfg: &Config, p: &Profile, auth: ClientAuth) -> Result<BackendRequest, String> {
+pub fn build_request(
+    cfg: &Config,
+    p: &Profile,
+    auth: ClientAuth,
+) -> Result<BackendRequest, String> {
     let proposals = |v: &[crate::net::Proposal], phase: &str| {
-        Vec1::try_from_vec(v.to_vec()).map_err(|_| missing(&format!("a {phase} proposal"), "it says which encryption the gateway may choose", &format!("select one under Advanced → {phase}")))
+        Vec1::try_from_vec(v.to_vec()).map_err(|_| {
+            missing(
+                &format!("a {phase} proposal"),
+                "it says which encryption the gateway may choose",
+                &format!("select one under Advanced → {phase}"),
+            )
+        })
     };
     let routes = match p.network.route_mode {
         RouteMode::Gateway => Routes::Gateway,
         RouteMode::Full => Routes::Full,
-        RouteMode::Custom => Routes::Custom(Vec1::try_from_vec(p.network.custom_routes.clone()).map_err(|_| {
-            missing("a network to route", "routing is set to only listed networks, and the list is empty", "enter one under Advanced → Network, or choose another routing option")
-        })?),
+        RouteMode::Custom => Routes::Custom(
+            Vec1::try_from_vec(p.network.custom_routes.clone()).map_err(|_| {
+                missing(
+                    "a network to route",
+                    "routing is set to only listed networks, and the list is empty",
+                    "enter one under Advanced → Network, or choose another routing option",
+                )
+            })?,
+        ),
     };
     Ok(BackendRequest {
-        gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway"))?,
+        gateway: p.gateway.clone().ok_or_else(|| {
+            missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway")
+        })?,
         ike_port: p.ike.port,
-        psk: Secret::new(p.psk.clone())
-            .map_err(|_| missing("a pre-shared key", "the FortiGate proves who it is with it, also when you sign in with SSO. Ask your administrator for it", "enter it under Connection → Pre-shared Key"))?,
+        psk: Secret::new(p.psk.clone()).map_err(|_| {
+            missing(
+                "a pre-shared key",
+                "the FortiGate proves who it is with it, also when you sign in with SSO. Ask your administrator for it",
+                "enter it under Connection → Pre-shared Key",
+            )
+        })?,
         auth,
         local_id: p.ike.local_id.clone(),
-        dh_groups: Vec1::try_from_vec(p.ike.dh_groups.clone())
-            .map_err(|_| missing("a DH group", "Phase 1 needs one for the key exchange", "select one under Advanced → Phase 1"))?,
+        dh_groups: Vec1::try_from_vec(p.ike.dh_groups.clone()).map_err(|_| {
+            missing("a DH group", "Phase 1 needs one for the key exchange", "select one under Advanced → Phase 1")
+        })?,
         ike_proposals: proposals(&p.ike.proposals, "Phase 1")?,
         esp_proposals: proposals(&p.esp.proposals, "Phase 2")?,
         natt_keepalive: p.ike.natt_keepalive,
@@ -157,18 +209,30 @@ fn preflight(cfg: &Config, p: &Profile) -> Result<(), String> {
     Ok(())
 }
 
-fn run(cfg: &Config, p: &Profile, shared: &Arc<Mutex<Shared>>, cancel: &Arc<AtomicBool>, send: Arc<dyn Fn(Event) + Send + Sync>) -> Result<(), String> {
+fn run(
+    cfg: &Config,
+    p: &Profile,
+    shared: &Arc<Mutex<Shared>>,
+    cancel: &Arc<AtomicBool>,
+    send: Arc<dyn Fn(Event) + Send + Sync>,
+) -> Result<(), String> {
     if charon::charon_binary().is_none() {
         return Err(charon::install_hint());
     }
     preflight(cfg, p)?;
 
     // ---- 1. SAML, unprivileged, in-process (SSO profiles only) ----
-    let sso_token = if p.sso.enabled { Some(sso_login(cfg, p, cancel, send.clone())?) } else { None };
+    let sso_token = if p.sso.enabled {
+        Some(sso_login(cfg, p, cancel, send.clone())?)
+    } else {
+        None
+    };
     if cancel.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let sso_token = sso_token.map(|t| Secret::new(t).map_err(|_| no_token())).transpose()?;
+    let sso_token = sso_token
+        .map(|t| Secret::new(t).map_err(|_| no_token()))
+        .transpose()?;
     let req = build_request(cfg, p, client_auth(cfg, p, sso_token)?)?;
 
     // ---- 2. IKE + tunnel as root: pkexec <self> --backend ----
@@ -176,14 +240,25 @@ fn run(cfg: &Config, p: &Profile, shared: &Arc<Mutex<Shared>>, cancel: &Arc<Atom
 }
 
 /// SAML login; Err("") on user cancel.
-fn sso_login(cfg: &Config, p: &Profile, cancel: &Arc<AtomicBool>, send: Arc<dyn Fn(Event) + Send + Sync>) -> Result<String, String> {
+fn sso_login(
+    cfg: &Config,
+    p: &Profile,
+    cancel: &Arc<AtomicBool>,
+    send: Arc<dyn Fn(Event) + Send + Sync>,
+) -> Result<String, String> {
     send(Event::Backend(BackendEvent::SamlStart));
     let s2 = send.clone();
     let log: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |m| s2(Event::Log(m)));
     let s3 = send.clone();
     let res = crate::saml::login(
         &crate::saml::SamlParams {
-            gateway: p.gateway.clone().ok_or_else(|| missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway"))?,
+            gateway: p.gateway.clone().ok_or_else(|| {
+                missing(
+                    "a remote gateway",
+                    "it's the FortiGate's address",
+                    "enter it under Connection → Remote Gateway",
+                )
+            })?,
             port: p.sso.port,
             uid: cfg.uid,
             verify_cert: p.sso.verify_cert,
@@ -192,7 +267,11 @@ fn sso_login(cfg: &Config, p: &Profile, cancel: &Arc<AtomicBool>, send: Arc<dyn 
         },
         cancel,
         log,
-        &move |url| s3(Event::Backend(BackendEvent::SamlUrl { url: url.to_string() })),
+        &move |url| {
+            s3(Event::Backend(BackendEvent::SamlUrl {
+                url: url.to_string(),
+            }))
+        },
     );
     let saml = match res {
         Err(e) if cancel.load(Ordering::SeqCst) => {
@@ -201,14 +280,23 @@ fn sso_login(cfg: &Config, p: &Profile, cancel: &Arc<AtomicBool>, send: Arc<dyn 
         }
         r => r?,
     };
-    send(Event::Backend(BackendEvent::SamlOk { username: saml.username }));
+    send(Event::Backend(BackendEvent::SamlOk {
+        username: saml.username,
+    }));
     Ok(saml.token)
 }
 
-fn run_backend(req: &BackendRequest, shared: &Arc<Mutex<Shared>>, cancel: &Arc<AtomicBool>, send: Arc<dyn Fn(Event) + Send + Sync>) -> Result<(), String> {
+fn run_backend(
+    req: &BackendRequest,
+    shared: &Arc<Mutex<Shared>>,
+    cancel: &Arc<AtomicBool>,
+    send: Arc<dyn Fn(Event) + Send + Sync>,
+) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot locate own executable: {e}"))?;
     send(Event::Elevating);
-    send(Event::Log("requesting root privileges (pkexec) to set up the tunnel".into()));
+    send(Event::Log(
+        "requesting root privileges (pkexec) to set up the tunnel".into(),
+    ));
     let mut child = Command::new("pkexec")
         .arg(&exe)
         .arg("--backend")
@@ -219,13 +307,16 @@ fn run_backend(req: &BackendRequest, shared: &Arc<Mutex<Shared>>, cancel: &Arc<A
         .map_err(|e| format!("cannot start pkexec: {e}"))?;
     let mut stdin = child.stdin.take().unwrap();
     let line = serde_json::to_string(req).map_err(|e| e.to_string())? + "\n";
-    stdin.write_all(line.as_bytes()).map_err(|e| format!("backend stdin: {e}"))?;
+    stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| format!("backend stdin: {e}"))?;
     stdin.flush().ok();
     shared.lock().unwrap().backend_stdin = Some(stdin);
     if cancel.load(Ordering::SeqCst)
-        && let Some(s) = shared.lock().unwrap().backend_stdin.as_mut() {
-            let _ = s.write_all(b"disconnect\n");
-        }
+        && let Some(s) = shared.lock().unwrap().backend_stdin.as_mut()
+    {
+        let _ = s.write_all(b"disconnect\n");
+    }
     let stderr = child.stderr.take().unwrap();
     let s4 = send.clone();
     let eth = std::thread::spawn(move || {
@@ -235,7 +326,10 @@ fn run_backend(req: &BackendRequest, shared: &Arc<Mutex<Shared>>, cancel: &Arc<A
             }
         }
     });
-    for line in BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+    for line in BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .map_while(Result::ok)
+    {
         send(stdout_event(line));
     }
     let _ = eth.join();
@@ -262,7 +356,10 @@ fn stdout_event(line: String) -> Event {
 
 /// Networks for log lines: "10.0.0.0/8, 10.1.0.0/16".
 fn nets(v: &[Ipv4Net]) -> String {
-    v.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+    v.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 // ═════════════════════════════ privileged side ═════════════════════════════
@@ -299,7 +396,9 @@ pub fn privileged_main() -> i32 {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
     if unsafe { libc::geteuid() } != 0 {
-        status(BackendEvent::Error { message: "backend must run as root".into() });
+        status(BackendEvent::Error {
+            message: "backend must run as root".into(),
+        });
         return 1;
     }
     let mut first = String::new();
@@ -309,7 +408,9 @@ pub fn privileged_main() -> i32 {
     let req: BackendRequest = match serde_json::from_str(&first) {
         Ok(r) => r,
         Err(e) => {
-            status(BackendEvent::Error { message: format!("bad backend request: {e}") });
+            status(BackendEvent::Error {
+                message: format!("bad backend request: {e}"),
+            });
             return 1;
         }
     };
@@ -346,9 +447,17 @@ fn run_privileged(r: &BackendRequest) -> Result<(), String> {
     if n > 0 {
         blog(format!("purged {n} stale item(s) from a previous run"));
     }
-    let dns_name = r.set_dns.then(|| charon::resolvconf_name(&r.ifname, charon::resolvconf_target().as_deref()));
-    let conf = charon::write_config(&charon::config(u32::from(r.natt_keepalive.get()), r.verbose, dns_name.as_deref()))?;
-    status(BackendEvent::IkeStart { gateway: r.gateway.clone() });
+    let dns_name = r
+        .set_dns
+        .then(|| charon::resolvconf_name(&r.ifname, charon::resolvconf_target().as_deref()));
+    let conf = charon::write_config(&charon::config(
+        u32::from(r.natt_keepalive.get()),
+        r.verbose,
+        dns_name.as_deref(),
+    ))?;
+    status(BackendEvent::IkeStart {
+        gateway: r.gateway.clone(),
+    });
     // charon must be started from this (the main) thread: it gets SIGTERM when this thread ends
     let mut child = charon::spawn(binary, &conf)?;
     let stderr = child.stderr.take().expect("piped stderr");
@@ -379,7 +488,13 @@ fn session(r: &BackendRequest, child: &mut std::process::Child) -> Result<(), St
         psk: r.psk.clone(),
     };
     // the interface exists before IKE, so charon can hand the VPN's DNS servers to resolvconf for it
-    let opts = TunnelOpts { ifname: r.ifname.clone(), mtu: r.mtu, routes: r.routes.overrides(), block_ipv6: r.block_ipv6, set_dns: r.set_dns };
+    let opts = TunnelOpts {
+        ifname: r.ifname.clone(),
+        mtu: r.mtu,
+        routes: r.routes.overrides(),
+        block_ipv6: r.block_ipv6,
+        set_dns: r.set_dns,
+    };
     let mut tun = Tunnel::create(&opts, &bdbg)?;
     let result = tunnel_session(&mut v, &mut tun, &params, &opts);
     // the SA first: charon then removes the VPN's DNS servers while the interface still exists
@@ -393,16 +508,35 @@ fn session(r: &BackendRequest, child: &mut std::process::Child) -> Result<(), St
 }
 
 /// Connect, configure the interface, drop privileges and wait until the session ends. The caller tears down.
-fn tunnel_session(v: &mut crate::vici::Vici, tun: &mut Tunnel, params: &ConnParams, opts: &TunnelOpts) -> Result<(), String> {
+fn tunnel_session(
+    v: &mut crate::vici::Vici,
+    tun: &mut Tunnel,
+    params: &ConnParams,
+    opts: &TunnelOpts,
+) -> Result<(), String> {
     let est = charon::connect(v, params, &blog)?;
-    blog(format!("IKE SA + child SA established: ip {} routes [{}]", est.vip, nets(&est.remote_ts)));
+    blog(format!(
+        "IKE SA + child SA established: ip {} routes [{}]",
+        est.vip,
+        nets(&est.remote_ts)
+    ));
     status(BackendEvent::Established { ip: est.vip });
     if STOP.load(Ordering::SeqCst) {
         return Ok(());
     }
     tun.configure(&est, opts, &bdbg)?;
-    status(BackendEvent::TunnelUp { ifname: opts.ifname.clone(), ip: est.vip, routes: tun.routes.clone(), full_tunnel: tun.full });
-    blog(format!("tunnel up: {} ip={} routes [{}]", opts.ifname, est.vip, nets(&tun.routes)));
+    status(BackendEvent::TunnelUp {
+        ifname: opts.ifname.clone(),
+        ip: est.vip,
+        routes: tun.routes.clone(),
+        full_tunnel: tun.full,
+    });
+    blog(format!(
+        "tunnel up: {} ip={} routes [{}]",
+        opts.ifname,
+        est.vip,
+        nets(&tun.routes)
+    ));
 
     // charon reports the SA going down (gateway delete, DPD timeout) as ike-updown
     v.register(EventName::IkeUpdown)?;
@@ -450,15 +584,26 @@ mod tests {
         p.gateway = None;
         let e = preflight(&cfg, &p).unwrap_err();
         assert!(e.contains("help: enter it under Connection → Remote Gateway"));
-        assert_eq!(Diag::parse(&e).and_then(|d| d.fix()), Some(Fix::Gateway), "the banner offers to go there");
+        assert_eq!(
+            Diag::parse(&e).and_then(|d| d.fix()),
+            Some(Fix::Gateway),
+            "the banner offers to go there"
+        );
         let (cfg, mut p) = profile();
         p.psk.clear();
         let e = preflight(&cfg, &p).unwrap_err();
-        assert!(e.contains("Ask your administrator for it") && e.contains("help: enter it under Connection → Pre-shared Key"), "{e}");
+        assert!(
+            e.contains("Ask your administrator for it")
+                && e.contains("help: enter it under Connection → Pre-shared Key"),
+            "{e}"
+        );
         assert_eq!(Diag::parse(&e).and_then(|d| d.fix()), Some(Fix::Psk));
         let (cfg, mut p) = profile();
         p.sso.enabled = false;
-        assert_eq!(Diag::parse(&preflight(&cfg, &p).unwrap_err()).and_then(|d| d.fix()), Some(Fix::Credentials));
+        assert_eq!(
+            Diag::parse(&preflight(&cfg, &p).unwrap_err()).and_then(|d| d.fix()),
+            Some(Fix::Credentials)
+        );
     }
 
     fn token() -> Secret {
@@ -469,8 +614,18 @@ mod tests {
     fn request_from_a_normal_profile() {
         let (cfg, p) = profile();
         let r = build_request(&cfg, &p, client_auth(&cfg, &p, Some(token())).unwrap()).unwrap();
-        assert_eq!(r.auth, ClientAuth::Eap { identity: EapIdentity::Uid(cfg.uid), secret: token() }, "SSO: the FortiClient UID is the EAP identity");
-        assert_eq!(crate::net::ike_proposals(&r.ike_proposals, &r.dh_groups), ["aes128-sha1-ecp384", "aes256-sha256-ecp384"]);
+        assert_eq!(
+            r.auth,
+            ClientAuth::Eap {
+                identity: EapIdentity::Uid(cfg.uid),
+                secret: token()
+            },
+            "SSO: the FortiClient UID is the EAP identity"
+        );
+        assert_eq!(
+            crate::net::ike_proposals(&r.ike_proposals, &r.dh_groups),
+            ["aes128-sha1-ecp384", "aes256-sha256-ecp384"]
+        );
         assert_eq!(r.routes, Routes::Gateway);
     }
 
@@ -478,13 +633,25 @@ mod tests {
     fn username_login_and_psk_only() {
         let (cfg, mut p) = profile();
         p.sso.enabled = false;
-        assert!(client_auth(&cfg, &p, None).unwrap_err().starts_with("error: can't connect without a username and password\n"));
+        assert!(
+            client_auth(&cfg, &p, None)
+                .unwrap_err()
+                .starts_with("error: can't connect without a username and password\n")
+        );
         p.auth.username = Some("jane".parse().unwrap());
-        assert!(client_auth(&cfg, &p, None).unwrap_err().starts_with("error: can't connect without a username and password\n"), "no password");
+        assert!(
+            client_auth(&cfg, &p, None)
+                .unwrap_err()
+                .starts_with("error: can't connect without a username and password\n"),
+            "no password"
+        );
         p.auth.password = "pw".into();
         assert_eq!(
             client_auth(&cfg, &p, None).unwrap(),
-            ClientAuth::Eap { identity: EapIdentity::User("jane".parse().unwrap()), secret: Secret::new("pw".into()).unwrap() }
+            ClientAuth::Eap {
+                identity: EapIdentity::User("jane".parse().unwrap()),
+                secret: Secret::new("pw".into()).unwrap()
+            }
         );
         p.auth.mode = UserAuth::None;
         assert_eq!(client_auth(&cfg, &p, None).unwrap(), ClientAuth::PskOnly);
@@ -499,12 +666,32 @@ mod tests {
             build_request(&cfg, &q, ClientAuth::PskOnly).unwrap_err()
         };
         // like the app's other errors: a headline, then what's wrong and what to do (see `diag`)
-        let refused = |e: String, headline: &str| assert!(e.starts_with(&format!("error: {headline}\n  note: ")) && e.contains("\n  help: "), "{e}");
-        refused(bad(&|q| q.gateway = None), "can't connect without a remote gateway");
-        refused(bad(&|q| q.psk.clear()), "can't connect without a pre-shared key");
-        refused(bad(&|q| q.ike.proposals.clear()), "can't connect without a Phase 1 proposal");
-        refused(bad(&|q| q.ike.dh_groups.clear()), "can't connect without a DH group");
-        refused(bad(&|q| q.esp.proposals.clear()), "can't connect without a Phase 2 proposal");
+        let refused = |e: String, headline: &str| {
+            assert!(
+                e.starts_with(&format!("error: {headline}\n  note: ")) && e.contains("\n  help: "),
+                "{e}"
+            )
+        };
+        refused(
+            bad(&|q| q.gateway = None),
+            "can't connect without a remote gateway",
+        );
+        refused(
+            bad(&|q| q.psk.clear()),
+            "can't connect without a pre-shared key",
+        );
+        refused(
+            bad(&|q| q.ike.proposals.clear()),
+            "can't connect without a Phase 1 proposal",
+        );
+        refused(
+            bad(&|q| q.ike.dh_groups.clear()),
+            "can't connect without a DH group",
+        );
+        refused(
+            bad(&|q| q.esp.proposals.clear()),
+            "can't connect without a Phase 2 proposal",
+        );
         let e = bad(&|q| {
             q.network.route_mode = RouteMode::Custom;
             q.network.custom_routes.clear();
@@ -517,26 +704,45 @@ mod tests {
         let (cfg, mut p) = profile();
         assert_eq!(preflight(&cfg, &p), Ok(()));
         p.psk.clear();
-        assert!(preflight(&cfg, &p).unwrap_err().starts_with("error: can't connect without a pre-shared key\n"));
+        assert!(
+            preflight(&cfg, &p)
+                .unwrap_err()
+                .starts_with("error: can't connect without a pre-shared key\n")
+        );
         let (cfg, mut p) = profile();
         p.sso.enabled = false;
-        assert!(preflight(&cfg, &p).unwrap_err().starts_with("error: can't connect without a username and password\n"));
+        assert!(
+            preflight(&cfg, &p)
+                .unwrap_err()
+                .starts_with("error: can't connect without a username and password\n")
+        );
     }
 
     #[test]
     fn routes_follow_the_routing_choice() {
         let (cfg, mut p) = profile();
         p.network.route_mode = RouteMode::Full;
-        assert_eq!(build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes, Routes::Full);
+        assert_eq!(
+            build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes,
+            Routes::Full
+        );
         p.network.route_mode = RouteMode::Custom;
         p.network.custom_routes = vec!["10.0.0.0/8".parse().unwrap()];
-        assert_eq!(build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes, Routes::Custom(vec1!["10.0.0.0/8".parse().unwrap()]));
+        assert_eq!(
+            build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes,
+            Routes::Custom(vec1!["10.0.0.0/8".parse().unwrap()])
+        );
     }
 
     #[test]
     fn unreadable_status_lines_are_logged_as_errors() {
-        assert!(matches!(stdout_event("@@{\"event\":\"connected\"}".into()), Event::Backend(BackendEvent::Connected)));
+        assert!(matches!(
+            stdout_event("@@{\"event\":\"connected\"}".into()),
+            Event::Backend(BackendEvent::Connected)
+        ));
         assert!(matches!(stdout_event("[*] hello".into()), Event::Log(l) if l == "[*] hello"));
-        assert!(matches!(stdout_event("@@{\"event\":\"tunnel_up\",\"dns\":[]}".into()), Event::Log(l) if l.starts_with("ERROR: unreadable status line")));
+        assert!(
+            matches!(stdout_event("@@{\"event\":\"tunnel_up\",\"dns\":[]}".into()), Event::Log(l) if l.starts_with("ERROR: unreadable status line"))
+        );
     }
 }
