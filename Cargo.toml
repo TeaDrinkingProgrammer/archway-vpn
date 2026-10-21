@@ -20,7 +20,7 @@ netlink-packet-route = "0.33"
 netlink-sys = "0.9"
 opener = { version = "0.9.0", features = ["reveal"] }
 rtnetlink = { version = "0.23", default-features = false, features = ["smol_socket"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.4"
 secret-service = { version = "5.2", features = ["rt-async-io-crypto-rust"] }
 serde = { version = "1.0.229", features = ["derive"] }
