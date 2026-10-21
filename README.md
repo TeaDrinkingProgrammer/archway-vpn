@@ -16,7 +16,7 @@ Archway is essentially a desktop frontend for [strongSwan](https://www.strongswa
 - **Username and password, too.** No SSO? Archway also supports classic username/password logins and pre-shared-key-only setups.
 - **Flexible routing.** Send only your company's networks through the VPN, route all traffic through it, or pick the networks yourself.
 - **Leak protection.** Archway uses the VPN's DNS so internal servers resolve by name, and in full-tunnel mode it blocks IPv6 so nothing bypasses the VPN.
-- **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. The defaults match FortiClient's too.
+- **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. Most defaults match FortiClient's too; certificate verification on the SSO port is on by default.
 - **Multiple connections.** Save as many VPN profiles as you need and switch between them in one click.
 - **Secure secret storage.** Your VPN key and password are stored securely in your system's password manager (KWallet, GNOME Keyring, KeePassXC), never in a plain file.
 - **Easy sharing.** Hand a working connection to a colleague as a single file.
@@ -198,7 +198,7 @@ The backend reports status events back to the GUI over stdout.
 - TLS on the SSO port:
   - *Verify the server certificate* uses the system CA store.
   - If the FortiGate omits its intermediate certificate, the app fetches it from the certificate's AIA URL, as browsers do. Downloaded certificates are only used as untrusted intermediates.
-  - With verification off, any certificate is accepted (FortiClient's default).
+  - Verification is on by default. With it off, any certificate is accepted, as in FortiClient's default setup, and anyone on the network path can send you to a fake login page. The editor warns about this under the checkbox.
 - The pkexec prompt names the binary path. Run the app from a location that only you (or root) can write to.
 - The backend runs no shell and no external commands. It configures the kernel over netlink, hands DNS to the standard `resolvconf` (through strongSwan) and controls strongSwan over its VICI socket. Interface names, routes, gateway names and proposals are checked against strict formats before anything runs as root, so a shared profile or a gateway can't inject commands.
 - strongSwan runs as a private instance with its own config and control socket in `/run/archway-vpn` (root only), with a fixed plugin list.

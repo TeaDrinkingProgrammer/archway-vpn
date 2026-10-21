@@ -57,12 +57,12 @@ pub struct SamlParams {
 }
 
 fn port_error(p: &SamlParams, cause: &str) -> String {
-    crate::diag(
-        "error",
-        &format!("no SSO login page at {}:{}", p.gateway, p.port),
-        cause,
-        "check the SSO port (FortiGate `auth-ike-saml-port`)",
-    )
+    let help = if cause.contains("invalid peer certificate") {
+        "the FortiGate's certificate isn't trusted by this system: ask your IT department for a trusted certificate, or turn off \"Verify the server certificate on the SSO port\""
+    } else {
+        "check the SSO port (FortiGate `auth-ike-saml-port`)"
+    };
+    crate::diag("error", &format!("no SSO login page at {}:{}", p.gateway, p.port), cause, help)
 }
 
 /// Why waiting for a background request ended without its answer.

@@ -656,6 +656,10 @@ fn sign_in_card(ui: &mut Ui, drafts: &mut Drafts, p: &mut Profile, fix: Option<F
             });
             ui.checkbox(&mut p.sso.open_browser, "Open the login page in the browser automatically");
             ui.checkbox(&mut p.sso.verify_cert, "Verify the server certificate on the SSO port");
+            if !p.sso.verify_cert {
+                let warning = "Without verification, anyone between you and the FortiGate can send you to a fake login page. Only turn this off if the FortiGate's certificate can't be verified.";
+                ui.add(egui::Label::new(RichText::new(warning).color(theme::tokens(ui).warning)).wrap());
+            }
         } else {
             ui.label(theme::caption(ui, "User Authentication"));
             ui.radio_value(&mut p.auth.mode, UserAuth::Eap, "Username and password (EAP)");

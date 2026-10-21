@@ -180,7 +180,7 @@ impl Default for Profile {
 
 impl Default for Sso {
     fn default() -> Self {
-        Self { enabled: true, port: Port::new(443).expect("nonzero"), open_browser: true, verify_cert: false, timeout: LoginTimeout::try_from(300).expect("in range") }
+        Self { enabled: true, port: Port::new(443).expect("nonzero"), open_browser: true, verify_cert: true, timeout: LoginTimeout::try_from(300).expect("in range") }
     }
 }
 
@@ -811,7 +811,7 @@ mod tests {
         let want = Profile {
             description: "Office".into(),
             gateway: Some("vpn.example.com".parse().unwrap()),
-            sso: Sso { port: Port::new(10443).unwrap(), ..Sso::default() },
+            sso: Sso { port: Port::new(10443).unwrap(), verify_cert: false, ..Sso::default() },
             auth: Auth { username: Some("jane".parse().unwrap()), ..Auth::default() },
             network: Network { route_mode: RouteMode::Custom, custom_routes: vec!["10.0.0.0/8".parse().unwrap()], ..Network::default() },
             ..Profile::default()
