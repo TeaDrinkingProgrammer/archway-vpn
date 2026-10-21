@@ -95,7 +95,7 @@ as defined in the Apache-2.0 license, shall be dual licensed as above, without a
 | strongSwan | `charon-systemd` with the EAP plugins: Fedora `strongswan`, Debian/Ubuntu `charon-systemd strongswan-swanctl libstrongswan-standard-plugins libcharon-extra-plugins libcharon-extauth-plugins`, Arch `strongswan`. The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. |
 | Runtime tools | `pkexec` (polkit) with a desktop polkit agent, `xdg-open`; a `resolvconf` implementation for VPN DNS |
 | Keyring (optional) | a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) to remember the PSK and password; without one they're kept in memory until the app closes |
-| Build | Rust ≥ 1.85 (edition 2024), `cargo` |
+| Build | Rust ≥ 1.95, `cargo` |
 | Display | X11 or Wayland; OpenGL rendering via glow |
 
 EAP methods are MSCHAPv2, GTC and MD5; the FortiGate picks one. DNS goes to the system through `resolvconf` (systemd-resolved, openresolv or Debian resolvconf). Routing all DNS queries through the VPN in full-tunnel mode needs systemd-resolved.
