@@ -1,32 +1,106 @@
 # Archway
 
-A native Linux client for **FortiGate dial-up IPsec (IKEv2) VPNs with SAML single sign-on**, written in Rust with an [egui](https://github.com/emilk/egui) interface. It supports Fortinet VPN IPsec connections, including SSO, which is not supported by the official FortiClient VPN application on Linux.
+Connect to your FortiGate IPsec (IKEv2) VPN with single sign-on, on Linux. Fortinet's own FortiClient can't do that, thanks to Archway, you finally can.
 
----
+Archway is essentially a desktop frontend for [strongSwan](https://www.strongswan.org/), the mature and widely used open-source IPsec implementation. strongSwan handles the key exchange, encryption and tunnel. Archway adds the FortiGate SSO login and sets up routes and DNS.
+
+> [!WARNING]
+> Archway is in a very early stage. Expect bugs and rough edges. If something breaks, please open an issue with the log (turn on verbose logging in Settings first).
+
+![Archway main window](docs/screenshot.png)
 
 ## Features
 
-- **SAML SSO:** login in your normal browser, with a local callback.
-- **Username/password (EAP)** and **pre-shared-key-only** modes when SSO is off.
-- **Encryption and tunneling** are handled by the robust strongSwan package.
-- **EAP methods:** MSCHAPv2, GTC and MD5 (the FortiGate picks one). The gateway is authenticated with the PSK.
-- **Routing:** split tunnel as pushed by the gateway, full tunnel, or a custom network list. In full-tunnel mode IPv6 is blocked so it can't leak around the VPN.
-- **DNS** from the VPN, handed to the system through `resolvconf` (systemd-resolved, openresolv or Debian resolvconf). In full-tunnel mode all queries go to the VPN when systemd-resolved is used.
-- **Root only while setting up:** a `pkexec` prompt appears on Connect. After the tunnel is up, the backend switches to your user and keeps only the network-admin and kill capabilities. The GUI itself never runs as root.
-- **Multiple connection profiles**, saved with the Save button. The PSK and password are stored in your desktop keyring.
+- **Single sign-on (SAML).** Log in through your own browser, with your organisation's usual login page, password manager and MFA.
+- **Built on strongSwan.** The VPN connection itself is handled by [strongSwan](https://www.strongswan.org/), the mature and stable open-source IPsec implementation.
+- **Username and password, too.** No SSO? Archway also supports classic username/password logins and pre-shared-key-only setups.
+- **Flexible routing.** Send only your company's networks through the VPN, route all traffic through it, or pick the networks yourself.
+- **Leak protection.** Archway uses the VPN's DNS so internal servers resolve by name, and in full-tunnel mode it blocks IPv6 so nothing bypasses the VPN.
+- **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. The defaults match FortiClient's too.
+- **Multiple connections.** Save as many VPN profiles as you need and switch between them in one click.
+- **Secure secret storage.** Your VPN key and password are stored securely in your system's password manager (KWallet, GNOME Keyring, KeePassXC), never in a plain file.
+- **Easy sharing.** Hand a working connection to a colleague as a single file.
+- **Live status.** See your VPN address, connection time and traffic at a glance.
+- **Minimal privileges.** Archway asks for your administrator password only when connecting, and the app itself never runs as administrator.
 
-## Requirements
+## Supported platforms
+
+Tested on:
+
+- Fedora 44
+- Ubuntu 26.04.1
+
+The release packages should also run on Debian 12 and 13, Ubuntu 24.04 and most other distributions released since late 2022 (glibc 2.36 or newer), but those haven't been tested. The technical requirements can be found [under 'requirements'](#requirements).
+
+## Install
+
+Download the `.rpm` (Fedora) or `.deb` (Debian, Ubuntu) from the [latest release](../../releases/latest) and install it with your package manager, which also installs strongSwan and the other dependencies:
+
+```bash
+sudo dnf install ./archway-vpn-*.rpm
+sudo apt install ./archway-vpn_*.deb
+```
+
+On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`. To build from source, see [Build and run](#build-and-run).
+
+## Usage
+
+1. Click **New Connection** and fill in the Connection card:
+   - **Remote Gateway:** the FortiGate address, for example `vpn.example.com`.
+   - **Pre-shared Key:** the phase 1 PSK. You need it even with SSO, because the gateway uses it to prove who it is.
+2. Under **Sign-in**:
+   - With SSO, turn on *Enable Single Sign On (SSO) for VPN Tunnel* and set **SSO Port** to the FortiGate's `auth-ike-saml-port`, for example 10443.
+   - Without SSO, choose *Username and password (EAP)* or *None (pre-shared key only)*.
+3. If your FortiGate or EMS profile needs it, adjust **VPN Settings**, **Phase 1**, **Phase 2** and **Network**. The defaults are FortiClient's: AES128-SHA1 and AES256-SHA256 with DH group 20.
+4. Click **Connect**. With SSO your browser opens; log in there. Then the system asks for your password. Once the tunnel is up, the status shows **Connected**.
+5. Click **Disconnect** to close the tunnel. Closing the window disconnects too.
+
+In **Settings** you can regenerate the Client UID (the FortiClient-style ID sent to the FortiGate) and turn on verbose logging. Encryption keys are never logged.
+
+## Limitations
+
+- IPv4 only, both inside the tunnel and for the gateway address.
+- One connection at a time.
+- Not supported: IKEv1, IPsec over TCP, SSL VPN, client certificates, FortiToken push or OTP challenges, EMS / ZTNA compliance checks.
+
+For SSL VPN, client certificates and FortiToken MFA, use Fortinet's free, VPN-only [FortiClient](https://www.fortinet.com/support/product-downloads). EMS / ZTNA compliance checks need the licensed FortiClient with EMS.
+
+FortiClient doesn't always work well on Linux, though, and some newer distributions can't install it at all. Archway only does IKEv2 for now, but if you need SSL VPN, IKEv1 or one of the other features above, please [open an issue](../../issues). We can consider adding it if there's enough demand.
+
+## Trademarks
+
+Fortinet®, FortiGate® and FortiClient® are registered trademarks of Fortinet, Inc. Archway is an independent project, not affiliated with, endorsed by or sponsored by Fortinet. The names are used only to say which VPN gateways Archway works with.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you,
+as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+## Technical details
+
+### Requirements
 
 | | |
 |---|---|
 | OS | Linux with XFRM interface support (kernel ≥ 4.19) |
-| strongSwan | `charon-systemd` with the EAP plugins: Fedora `strongswan`, Debian/Ubuntu `charon-systemd strongswan-swanctl libstrongswan-standard-plugins libcharon-extra-plugins libcharon-extauth-plugins`, Arch `strongswan`. The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used: it has no EAP-MSCHAPv2. |
+| strongSwan | `charon-systemd` with the EAP plugins: Fedora `strongswan`, Debian/Ubuntu `charon-systemd strongswan-swanctl libstrongswan-standard-plugins libcharon-extra-plugins libcharon-extauth-plugins`, Arch `strongswan`. The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. |
 | Runtime tools | `pkexec` (polkit) with a desktop polkit agent, `xdg-open`; a `resolvconf` implementation for VPN DNS |
 | Keyring (optional) | a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) to remember the PSK and password; without one they're kept in memory until the app closes |
 | Build | Rust ≥ 1.85 (edition 2024), `cargo` |
 | Display | X11 or Wayland; OpenGL rendering via glow |
 
-## Build and run
+EAP methods are MSCHAPv2, GTC and MD5; the FortiGate picks one. DNS goes to the system through `resolvconf` (systemd-resolved, openresolv or Debian resolvconf). Routing all DNS queries through the VPN in full-tunnel mode needs systemd-resolved.
+
+### Build and run
 
 ```bash
 cargo build --release
@@ -35,35 +109,14 @@ cargo build --release
 
 The binary is self-contained. When you connect, it starts a second copy of itself as root (`pkexec archway-vpn --backend`).
 
-## Usage
-
-1. Click **➕ New** and fill in the connection:
-   - **Remote gateway:** the FortiGate address, e.g. `vpn.example.com`.
-   - **Pre-shared key:** the phase 1 PSK. It is needed even with SSO, because the gateway authenticates itself with it.
-2. Under **Authentication**:
-   - **With SSO:** tick *Enable Single Sign On (SSO) for VPN Tunnel* and set **Customize port** to the FortiGate's `auth-ike-saml-port`, for example 10443.
-   - **Without SSO:** choose *Username and password (EAP)* or *None (pre-shared key only)*.
-3. Optionally adjust **VPN settings**, **Phase 1**, **Phase 2** and **Network** to match the FortiGate / EMS profile. The defaults match FortiClient's: AES128-SHA1 and AES256-SHA256, DH 20.
-4. Click **Connect**:
-   1. With SSO, your browser opens; log in there.
-   2. The system asks for your password (pkexec), because setting up the tunnel needs root.
-   3. The status changes to **Connected**, showing the VPN IP, routes, duration and traffic counters.
-5. Click **Disconnect** to tear everything down. Closing the window also disconnects.
-
-**Settings (⚙):**
-- **Client UID:** the FortiClient-style installation ID sent to the FortiGate. You can regenerate it.
-- **Verbose logging:** encryption keys are always redacted.
-
-### Command-line modes
-
 | Command | Purpose |
 |---|---|
 | `archway-vpn` | Start the GUI |
 | `archway-vpn --backend` | Internal: the privileged backend started by pkexec |
 
-Environment: `ARCHWAY_BROWSER=<command>` replaces `xdg-open` for opening the SSO page.
+Set `ARCHWAY_BROWSER=<command>` to open the SSO page with something other than `xdg-open`.
 
-## How it works
+### How it works
 
 ```mermaid
 flowchart LR
@@ -96,94 +149,67 @@ flowchart LR
 5. The backend starts a private charon and loads the connection and secrets over its VICI socket.
 6. charon runs IKEv2 + EAP with the FortiGate (UDP 500/4500) and gets the virtual IP and DNS servers.
 7. The backend creates archway0 over netlink, then adds the address and routes; charon hands DNS to resolvconf. The backend then switches to your user.
-8. The kernel carries the ESP traffic.
+8. The kernel encrypts and carries the ESP traffic.
 
 The backend reports status events back to the GUI over stdout.
 
-- The GUI never runs as root. The backend is root only while it sets up the tunnel; then it switches to your user and keeps only two capabilities: network admin, to tear the tunnel down again, and kill, to stop its strongSwan instance.
-- IKE, rekeying and the kernel IPsec SAs are handled by strongSwan's charon, run as a private instance with its own config and control socket. It stops when the backend exits.
-- Secrets (PSK, SSO token, password) reach the backend over a pipe, never on the command line, and reach charon over its control socket, never in a file. The stdin pipe then acts as the control channel: a `disconnect` line, or EOF when the GUI exits or crashes, makes the backend clean up and exit.
-- If the backend is killed outright, its interface and routes stay behind until the next Connect (or a reboot), which removes them.
-- Traffic is encrypted by the kernel.
+- The backend is root only while it sets up the tunnel. Then it switches to your user and keeps two capabilities: network admin, to tear the tunnel down again, and kill, to stop its strongSwan instance.
+- strongSwan's charon handles IKE, rekeying and the kernel IPsec SAs. It runs as a private instance with its own config and control socket, and stops when the backend exits.
+- Secrets (PSK, SSO token, password) reach the backend over a pipe and charon over its control socket. They never appear on a command line or in a file. The stdin pipe then acts as the control channel: a `disconnect` line, or EOF when the GUI exits or crashes, makes the backend clean up and exit.
+- If the backend is killed outright, its interface and routes stay until the next Connect (or a reboot), which removes them.
 
-### Source layout
+#### Source layout
 
 | File | Role |
 |---|---|
-| `src/main.rs` | egui UI; dispatches `--backend` |
+| `src/main.rs` | app state and button actions; dispatches `--backend` |
+| `src/view.rs` | what the window shows: connection list, status card, editor, settings, log |
+| `src/form.rs` | editing typed settings as text, with errors under the field |
+| `src/theme.rs` | colours, fonts and custom widgets |
+| `src/glide.rs` | eased mouse-wheel scrolling |
+| `src/diag.rs` | error messages for the log and the banner |
 | `src/config.rs` | profile model, defaults, TOML settings files and state |
 | `src/keyring.rs` | PSK / password storage in the Secret Service |
+| `src/protocol.rs` | GUI ↔ backend messages |
 | `src/backend.rs` | connection session, pkexec bridge, privileged session (charon + tunnel + privilege drop) |
 | `src/charon.rs` | private strongSwan charon: config, start, connection and secrets over VICI, error messages |
 | `src/vici.rs` | strongSwan VICI client |
 | `src/net.rs` | checked value types (interface names, networks, DNS names, proposals, secrets) |
 | `src/netlink.rs` | kernel interface / address / route setup over netlink |
 | `src/resolved.rs` | full tunnel: route all DNS queries to the VPN (systemd-resolved, D-Bus) |
-| `src/privdrop.rs` | switch to the user with only CAP_NET_ADMIN |
+| `src/privdrop.rs` | switch to the user with only CAP_NET_ADMIN and CAP_KILL |
 | `src/tunnel.rs` | tunnel plumbing and teardown |
 | `src/saml.rs` | FortiGate SAML flow and local callback server |
 | `src/tls.rs` | rustls HTTPS client with system CAs and AIA intermediate fetching |
 
-## Configuration and security
+### Configuration and security
 
-- Settings are saved when you click **Save**, under `~/.config/archway-vpn/` (or `$XDG_CONFIG_HOME`), mode `0600` in a `0700` directory. Closing with unsaved changes asks first.
+- Settings are saved when you click **Save Changes**, under `~/.config/archway-vpn/` (or `$XDG_CONFIG_HOME`), mode `0600` in a `0700` directory. Closing with unsaved changes asks first.
   - `config.toml`: app settings (client UID, verbose logging).
-  - `profiles/<connection name>.toml`: one file per connection. To share a connection, click **🔗 Share** and send the file. The recipient puts it in their `profiles/` folder, restarts the app and enters the PSK.
+  - `profiles/<connection name>.toml`: one file per connection. To share a connection, click **Share** and send the file. The recipient puts it in their `profiles/` folder, restarts the app and enters the PSK.
   - Both only contain settings that differ from the defaults.
 - `~/.local/state/archway-vpn/state.json` (or `$XDG_STATE_HOME`) holds which connection is selected and the internal ids that link connections to their keyring items. The app manages it; don't edit it.
-- A connection file that can't be read is reported at startup and left untouched. A `config.toml` that can't be read is reported and replaced when you click **Save**. Older `config.json` files are not read.
-- Every setting is checked when a file is read and while you type. A connection file with an invalid value (an interface name with a space, a route such as `10.1.2.3/16` with host bits set, a username with non-ASCII characters) is reported and left alone. In the editor, a field that's refused says why underneath, and Save and Connect stay disabled until it's fixed; the connection is marked ⚠ in the list.
-- `custom_routes` is a list: `custom_routes = ["10.0.0.0/8", "192.168.10.0/24"]`. Files with the older single string (`"10.0.0.0/8, 192.168.10.0/24"`) still load and are written as a list on the next Save.
-- The **PSK** and a **saved password** are not in these files. They're stored in your desktop keyring through the freedesktop Secret Service, as items labelled `Archway VPN: <connection> (PSK)` / `(password)`. Without a Secret Service they're kept in memory until the app closes.
-- A password is stored only if *Save password* is ticked; otherwise it lives in memory until the app closes.
+- A connection file that can't be read is reported at startup and left untouched. A `config.toml` that can't be read is reported and replaced on the next save.
+- Every setting is checked when a file is read and while you type. A connection file with an invalid value (an interface name with a space, a route such as `10.1.2.3/16` with host bits set, a username with non-ASCII characters) is reported and left alone. In the editor, a refused field says why underneath, Save and Connect stay disabled until it's fixed, and the connection is marked ⚠ in the list.
+- `custom_routes` is a list: `custom_routes = ["10.0.0.0/8", "192.168.10.0/24"]`.
+- The PSK and a saved password are not in these files. They're in your desktop keyring through the freedesktop Secret Service, as items labelled `Archway VPN: <connection> (PSK)` / `(password)`. Without a Secret Service they're kept in memory until the app closes.
+- A password is stored only if *Save password* is ticked; otherwise it stays in memory until the app closes.
 - The SSO token is single-use and never written to disk.
-- **TLS on the SSO port:**
+- TLS on the SSO port:
   - *Verify the server certificate* uses the system CA store.
-  - If the FortiGate omits its intermediate certificate, it is fetched via the certificate's AIA URL, like browsers do. Downloaded certificates are only used as untrusted intermediates.
-  - With verification off, any certificate is accepted (FortiClient's default behaviour).
+  - If the FortiGate omits its intermediate certificate, the app fetches it from the certificate's AIA URL, as browsers do. Downloaded certificates are only used as untrusted intermediates.
+  - With verification off, any certificate is accepted (FortiClient's default).
 - The pkexec prompt names the binary path. Run the app from a location that only you (or root) can write to.
-- **No shell, no command lines:** the backend configures the kernel over netlink, hands DNS to the standard `resolvconf` (through strongSwan) and controls strongSwan over its VICI socket. Interface names, routes, gateway names and proposals are checked against strict formats before anything runs as root, so a shared profile or a gateway can't inject commands.
-- strongSwan runs as a private instance with its own config and control socket in `/run/archway-vpn` (root only), with a fixed plugin list. The PSK and token are handed to it over that socket, never written to a file.
-- Fortinet-specific Mode Config extras (split networks sent as Fortinet attributes, search domain, banner) aren't used: routes come from the traffic selectors or from the custom routes in the profile.
+- The backend runs no shell and no external commands. It configures the kernel over netlink, hands DNS to the standard `resolvconf` (through strongSwan) and controls strongSwan over its VICI socket. Interface names, routes, gateway names and proposals are checked against strict formats before anything runs as root, so a shared profile or a gateway can't inject commands.
+- strongSwan runs as a private instance with its own config and control socket in `/run/archway-vpn` (root only), with a fixed plugin list.
+- Fortinet-specific Mode Config extras (split networks sent as Fortinet attributes, search domain, banner) and Fortinet private notifies (license blob, EMS serial) aren't used. Routes come from the traffic selectors or from the custom routes in the profile.
+- The xfrm `if_id` and route tag are fixed, which is why only one connection can be up at a time.
 
-## Testing
+### Testing
 
 ```bash
 cargo test                       # unit tests: value checks, VICI, charon config/messages, request building, app
 ./scripts/netns-test.sh          # kernel tests, each in a throwaway network namespace (no root needed)
 ```
 
-End-to-end: connect with the app (turn on verbose logging in Settings) and check the tunnel with `ip -br addr show archway0` and `ip route show proto 233`.
-
-## Limitations
-
-- **IPv4 only:** the inner tunnel and the gateway address are IPv4.
-- **Not supported:**
-  - IKEv1, IKE over TCP / "IPsec over TCP"
-  - SSL VPN
-  - Client certificate authentication
-  - FortiToken push / OTP challenges
-  - EMS / ZTNA compliance checks
-  - Fortinet private notifies (license blob, EMS serial)
-
-  SSL VPN, client certificates and FortiToken MFA are available in Fortinet's free, VPN-only [FortiClient](https://www.fortinet.com/support/product-downloads). Use it for those. EMS / ZTNA compliance checks need the licensed FortiClient with EMS. FortiClient VPN-only has no IPsec SSO on Linux, which is the gap this client fills.
-- **One connection at a time.** The xfrm `if_id` and route tag are fixed.
-- **Platform dependencies:** VPN DNS needs a `resolvconf` implementation (routing all queries through the VPN in full tunnel needs systemd-resolved); the root prompt requires a polkit agent.
-
-## Trademarks
-
-Fortinet®, FortiGate® and FortiClient® are registered trademarks of Fortinet, Inc. Archway is an independent project: it is not affiliated with, endorsed by or sponsored by Fortinet. These names are used only to say which VPN gateways Archway works with.
-
-## License
-
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
-
-at your option.
-
-### Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you,
-as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+End to end: connect with the app (turn on verbose logging in Settings) and check the tunnel with `ip -br addr show archway0` and `ip route show proto 233`.
