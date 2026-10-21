@@ -1,0 +1,3 @@
+[default.extend-words]
+# netlink: output interface (RTA_OIF)
+oif = "oif"
