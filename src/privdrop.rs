@@ -121,10 +121,13 @@ mod tests {
         // SAFETY: test-only env changes; these tests don't run in parallel with others reading PKEXEC_UID
         unsafe { std::env::set_var("PKEXEC_UID", "1000") };
         assert_eq!(pkexec_uid().map(NonRootUid::get), Ok(1000));
+        // SAFETY: as above
         unsafe { std::env::set_var("PKEXEC_UID", "0") };
         assert!(pkexec_uid().is_err());
+        // SAFETY: as above
         unsafe { std::env::set_var("PKEXEC_UID", "x") };
         assert!(pkexec_uid().is_err());
+        // SAFETY: as above
         unsafe { std::env::remove_var("PKEXEC_UID") };
         assert!(pkexec_uid().is_err());
     }

@@ -389,12 +389,14 @@ extern "C" fn on_signal(_: libc::c_int) {
 
 /// Entry point for `archway-vpn --backend` (run via pkexec).
 pub fn privileged_main() -> i32 {
+    // SAFETY: on_signal only stores to an atomic, which is async-signal-safe; SIG_IGN needs no handler.
     unsafe {
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGHUP, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
+    // SAFETY: geteuid has no preconditions and can't fail.
     if unsafe { libc::geteuid() } != 0 {
         status(BackendEvent::Error {
             message: "backend must run as root".into(),
