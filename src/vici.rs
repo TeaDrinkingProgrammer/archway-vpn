@@ -1,6 +1,6 @@
 //! Minimal synchronous client for strongSwan's VICI protocol (the API `swanctl` uses) over a Unix socket.
 //! Wire format: u32 big-endian length, then a packet type byte, a length-prefixed name for named types, and a
-//! message body encoded with `serde_vici`. See https://docs.strongswan.org/docs/latest/plugins/vici.html
+//! message body encoded with `serde_vici`. See <https://docs.strongswan.org/docs/latest/plugins/vici.html>
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};

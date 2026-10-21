@@ -106,7 +106,7 @@ fn dechunk(mut b: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Extract certificates from DER, PEM or a PKCS#7 bundle (.p7c) by scanning for embedded X.509 SEQUENCEs.
+/// Extract certificates from DER, PEM or a PKCS#7 bundle (.p7c) by scanning for embedded X.509 SEQUENCE structures.
 fn certs_from_blob(data: &[u8]) -> Vec<CertificateDer<'static>> {
     if data.starts_with(b"-----BEGIN") {
         let text = String::from_utf8_lossy(data);

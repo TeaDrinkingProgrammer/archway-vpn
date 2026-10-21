@@ -36,7 +36,7 @@ use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
-/// rustc-style message: "<level>: <headline>" plus a `note` (the cause) and a `help` (what now) line.
+/// rustc-style message: `<level>: <headline>` plus a `note` (the cause) and a `help` (what now) line.
 pub fn diag(level: &str, headline: &str, note: &str, help: &str) -> String {
     diag::Diag::new(level, headline, note, help).to_string()
 }

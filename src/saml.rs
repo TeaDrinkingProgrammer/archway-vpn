@@ -1,7 +1,10 @@
 //! SAML SSO for FortiGate IKE (external-browser flow of FortiAuth.dll `GetIpsecSamlDataExternalBrowser`):
+//!
+//! ```text
 //!   POST https://<gw>:<ike_saml_port>/saml_login?   UID=<uid>&REDIRECT_PORT=<p>
 //!   -> window.location="<IdP URL>"  -> user logs in in the browser
 //!   -> FortiGate redirects the browser to http://127.0.0.1:<p>/?...tokenid=<T>&...&username=<U>
+//! ```
 
 use std::io::{Read, Write};
 use std::net::TcpListener;

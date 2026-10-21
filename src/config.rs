@@ -1,5 +1,5 @@
 //! Settings, written when the user clicks Save (paths in `Paths`):
-//! - config.toml: app settings; profiles/<name>.toml: one per connection, shareable by copying the file.
+//! - `config.toml`: app settings; `profiles/<name>.toml`: one per connection, shareable by copying the file.
 //!   Both only hold values that differ from the default.
 //! - state.json in the XDG state dir: profile ids (the keyring key), selection, log panel. App-only.
 //!
@@ -50,7 +50,7 @@ pub enum RouteMode {
     Custom,
 }
 
-/// A connection: profiles/<name>.toml holds everything except id, name and secrets, in the same sections.
+/// A connection: `profiles/<name>.toml` holds everything except id, name and secrets, in the same sections.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Profile {
