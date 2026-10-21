@@ -1,8 +1,10 @@
 name: release
 
+# Publishing a release in GitHub (Releases > Draft a new release, with a new tag such as v0.3.0) builds the packages
+# and adds them to that release.
 on:
-  push:
-    tags: ["v[0-9]*"]
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -85,9 +87,9 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Create the release
+      - name: Add the packages to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/* --verify-tag --generate-notes
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*
