@@ -15,6 +15,19 @@ use std::time::Duration;
 
 type Log = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Largest response read from the FortiGate or an AIA URL. Login pages and certificate bundles are a few kB; the cap
+/// keeps a hostile server from filling memory.
+const MAX_RESPONSE: u64 = 1 << 20;
+
+/// Read `r` to its end, but no more than `MAX_RESPONSE` bytes.
+fn read_capped(r: impl Read, buf: &mut Vec<u8>) -> std::io::Result<()> {
+    r.take(MAX_RESPONSE + 1).read_to_end(buf)?;
+    if buf.len() as u64 > MAX_RESPONSE {
+        return Err(std::io::Error::other(format!("response larger than {} kB", MAX_RESPONSE / 1024)));
+    }
+    Ok(())
+}
+
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
@@ -29,7 +42,7 @@ fn http_get(url: &str) -> Result<Vec<u8>, String> {
     s.set_read_timeout(Some(Duration::from_secs(10))).ok();
     write!(s, "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: archway\r\n\r\n").map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
-    s.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    read_capped(&mut s, &mut buf).map_err(|e| e.to_string())?;
     let (head, body) = split_http(&buf)?;
     if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
         return Err(format!("AIA fetch {url}: {}", head.lines().next().unwrap_or("")));
@@ -244,7 +257,7 @@ fn https_request(method: &str, host: &str, port: u16, path: &str, headers: &[(&s
     tls.write_all(req.as_bytes()).map_err(|e| format!("TLS: {e}"))?;
     tls.write_all(body).map_err(|e| format!("TLS: {e}"))?;
     let mut buf = Vec::new();
-    match tls.read_to_end(&mut buf) {
+    match read_capped(&mut tls, &mut buf) {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !buf.is_empty() => {} // no close_notify
         Err(e) => return Err(format!("TLS: {e}")),
@@ -252,3 +265,17 @@ fn https_request(method: &str, host: &str, port: u16, path: &str, headers: &[(&s
     split_http(&buf)
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_over_the_cap_are_refused() {
+        let mut buf = Vec::new();
+        read_capped(&vec![0u8; MAX_RESPONSE as usize][..], &mut buf).unwrap();
+        assert_eq!(buf.len() as u64, MAX_RESPONSE);
+        let mut buf = Vec::new();
+        assert!(read_capped(&vec![0u8; MAX_RESPONSE as usize + 1][..], &mut buf).is_err());
+    }
+}
