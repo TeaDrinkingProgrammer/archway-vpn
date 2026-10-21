@@ -6,6 +6,8 @@ Archway is essentially a desktop frontend for [strongSwan](https://www.strongswa
 
 > [!WARNING]
 > Archway is in a very early stage. Expect bugs and rough edges. If something breaks, please open an issue with the log (turn on verbose logging in Settings first).
+>
+> Archway is a side project. Its main use is connecting to company networks. If you rely on a VPN to keep your traffic private or secure, please use another solution.
 
 ![Archway main window](docs/screenshot.png)
 
