@@ -107,6 +107,8 @@ cargo build --release
 ./target/release/archway-vpn
 ```
 
+With rustup, cargo uses the Rust version pinned in `rust-toolchain.toml` and installs it if needed.
+
 The binary is self-contained. When you connect, it starts a second copy of itself as root (`pkexec archway-vpn --backend`).
 
 | Command | Purpose |
