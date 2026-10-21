@@ -2,7 +2,7 @@
 name = "archway-vpn"
 version = "0.1.0"
 edition = "2024"
-authors = ["Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
+authors = ["Stijn van Houwelingen <teadrinkingprogrammer@proton.me>", "Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
 description = "Connect to FortiGate IPsec (IKEv2) VPNs with SAML single sign-on"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
@@ -42,7 +42,7 @@ codegen-units = 1
 # Release packages: `cargo deb` and `cargo generate-rpm` (see .github/workflows/release.yml). Dependencies are listed by
 # hand: the GUI libs are dlopen()ed, so automatic detection would miss them.
 [package.metadata.deb]
-copyright = "2026 Wilco van Beijnum"
+copyright = "2026 Stijn van Houwelingen, Wilco van Beijnum"
 extended-description = """\
 Archway drives a private strongSwan charon instance and asks for root \
 through pkexec only while the tunnel is being set up."""

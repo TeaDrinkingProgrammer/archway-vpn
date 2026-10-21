@@ -1,4 +1,5 @@
-# Maintainer: Wilco van Beijnum <github@wilcovanbeijnum.nl>
+# Maintainer: Stijn van Houwelingen <teadrinkingprogrammer@proton.me>
+# Contributor: Wilco van Beijnum <github@wilcovanbeijnum.nl>
 # Source build for the AUR.
 # Per release: set pkgver to the release tag without its v (tag v0.2.0 -> pkgver=0.2.0), reset pkgrel to 1.
 pkgname=archway-vpn
