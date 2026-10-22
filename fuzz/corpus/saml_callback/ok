@@ -1,0 +1,4 @@
+GET /?tokenid=ab%2Fc123&realm=&username=jane%40corp.example&id=1 HTTP/1.1
+Host: 127.0.0.1:4321
+Connection: keep-alive
+

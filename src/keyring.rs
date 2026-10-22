@@ -43,22 +43,37 @@ pub fn item_label(profile_name: &str, kind: Kind) -> String {
 
 #[derive(PartialEq)]
 pub enum Op {
-    Set { profile_id: String, kind: Kind, label: String, secret: String },
-    DeleteProfile { profile_id: String },
+    Set {
+        profile_id: String,
+        kind: Kind,
+        label: String,
+        secret: String,
+    },
+    DeleteProfile {
+        profile_id: String,
+    },
 }
 
 /// Hand-written so the secret never ends up in a log or panic message.
 impl std::fmt::Debug for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Op::Set { profile_id, kind, label, secret } => f
+            Op::Set {
+                profile_id,
+                kind,
+                label,
+                secret,
+            } => f
                 .debug_struct("Set")
                 .field("profile_id", profile_id)
                 .field("kind", kind)
                 .field("label", label)
                 .field("secret", &if secret.is_empty() { "" } else { "<redacted>" })
                 .finish(),
-            Op::DeleteProfile { profile_id } => f.debug_struct("DeleteProfile").field("profile_id", profile_id).finish(),
+            Op::DeleteProfile { profile_id } => f
+                .debug_struct("DeleteProfile")
+                .field("profile_id", profile_id)
+                .finish(),
         }
     }
 }
@@ -99,16 +114,29 @@ pub fn plan(saved: &Config, cfg: &Config) -> Vec<Op> {
                 None => !new.is_empty(),
             };
             if changed {
-                ops.push(Op::Set { profile_id: p.id.clone(), kind, label: item_label(p.name.as_str(), kind), secret: new.into() });
+                ops.push(Op::Set {
+                    profile_id: p.id.clone(),
+                    kind,
+                    label: item_label(p.name.as_str(), kind),
+                    secret: new.into(),
+                });
             }
         }
     }
-    for o in saved.profiles.iter().filter(|o| !cfg.profiles.iter().any(|p| p.id == o.id)) {
-        ops.push(Op::DeleteProfile { profile_id: o.id.clone() });
+    for o in saved
+        .profiles
+        .iter()
+        .filter(|o| !cfg.profiles.iter().any(|p| p.id == o.id))
+    {
+        ops.push(Op::DeleteProfile {
+            profile_id: o.id.clone(),
+        });
     }
     // profiles whose file vanished outside the app
     for id in &cfg.orphans {
-        ops.push(Op::DeleteProfile { profile_id: id.clone() });
+        ops.push(Op::DeleteProfile {
+            profile_id: id.clone(),
+        });
     }
     ops
 }
@@ -117,12 +145,25 @@ pub fn plan(saved: &Config, cfg: &Config) -> Vec<Op> {
 /// saved value (and its profile the saved name), so it still counts as unsaved and the next Save retries it,
 /// an orphan whose delete failed stays in `orphans`,
 /// and one message per failure.
-pub fn apply(store: &dyn SecretStore, ops: &[Op], saved: &Config, cfg: &Config) -> (Config, Vec<String>) {
-    let mut next = Config { orphans: Vec::new(), ..cfg.clone() };
+pub fn apply(
+    store: &dyn SecretStore,
+    ops: &[Op],
+    saved: &Config,
+    cfg: &Config,
+) -> (Config, Vec<String>) {
+    let mut next = Config {
+        orphans: Vec::new(),
+        ..cfg.clone()
+    };
     let mut errors = Vec::new();
     for op in ops {
         match op {
-            Op::Set { profile_id, kind, label, secret } => {
+            Op::Set {
+                profile_id,
+                kind,
+                label,
+                secret,
+            } => {
                 if let Err(e) = store.set(profile_id, *kind, label, secret) {
                     errors.push(diag(
                         "error",
@@ -132,7 +173,8 @@ pub fn apply(store: &dyn SecretStore, ops: &[Op], saved: &Config, cfg: &Config) 
                     ));
                     match saved.profiles.iter().find(|o| &o.id == profile_id) {
                         Some(o) => {
-                            if let Some(n) = next.profiles.iter_mut().find(|n| &n.id == profile_id) {
+                            if let Some(n) = next.profiles.iter_mut().find(|n| &n.id == profile_id)
+                            {
                                 n.name = o.name.clone(); // a failed relabel is retried too
                                 *field(n, *kind) = field_ref(o, *kind).clone();
                                 if *kind == Kind::Password {
@@ -165,20 +207,31 @@ pub fn apply(store: &dyn SecretStore, ops: &[Op], saved: &Config, cfg: &Config) 
 
 /// Fill every profile's PSK, and its password if `save_password`, from the store. One message per failed read.
 pub fn fill(store: &dyn SecretStore, cfg: &mut Config) -> Vec<String> {
-    cfg.profiles.iter_mut().flat_map(|p| fill_profile(store, p)).collect()
+    cfg.profiles
+        .iter_mut()
+        .flat_map(|p| fill_profile(store, p))
+        .collect()
 }
 
 /// `fill` for a single profile.
 pub fn fill_profile(store: &dyn SecretStore, p: &mut Profile) -> Vec<String> {
     let mut errors = Vec::new();
-    let kinds: &[Kind] = if p.auth.save_password { &[Kind::Psk, Kind::Password] } else { &[Kind::Psk] };
+    let kinds: &[Kind] = if p.auth.save_password {
+        &[Kind::Psk, Kind::Password]
+    } else {
+        &[Kind::Psk]
+    };
     for &kind in kinds {
         match store.get(&p.id, kind) {
             Ok(Some(s)) => *field(p, kind) = s,
             Ok(None) => {}
             Err(e) => errors.push(diag(
                 "error",
-                &format!("the {} of \"{}\" couldn't be read from the keyring", kind.name(), p.name),
+                &format!(
+                    "the {} of \"{}\" couldn't be read from the keyring",
+                    kind.name(),
+                    p.name
+                ),
                 &e,
                 "enter it again and click Save",
             )),
@@ -203,7 +256,9 @@ impl Unavailable {
             Unavailable::NoService(e) => diag(
                 "warning",
                 headline,
-                &format!("no keyring service found: {e} (is GNOME Keyring, KWallet or KeePassXC running?)"),
+                &format!(
+                    "no keyring service found: {e} (is GNOME Keyring, KWallet or KeePassXC running?)"
+                ),
                 "they're kept in memory until you close the app",
             ),
             Unavailable::NoDefault => diag(
@@ -238,7 +293,8 @@ fn attrs(profile_id: &str, kind: Option<Kind>) -> HashMap<&str, &str> {
 impl SecretServiceStore {
     /// Connect and unlock the default collection; this may show the system unlock prompt.
     pub fn connect() -> Result<Self, Unavailable> {
-        let ss = SecretService::connect(EncryptionType::Dh).map_err(|e| Unavailable::NoService(e.to_string()))?;
+        let ss = SecretService::connect(EncryptionType::Dh)
+            .map_err(|e| Unavailable::NoService(e.to_string()))?;
         let store = Self { ss };
         store.collection().map_err(|e| match e {
             Error::Prompt | Error::PromptDisconnected | Error::Locked => Unavailable::Locked,
@@ -262,10 +318,16 @@ impl SecretStore for SecretServiceStore {
     fn get(&self, profile_id: &str, kind: Kind) -> Result<Option<String>, String> {
         let run = || -> Result<Option<String>, Error> {
             let c = self.collection()?;
-            let Some(item) = c.search_items(attrs(profile_id, Some(kind)))?.into_iter().next() else {
+            let Some(item) = c
+                .search_items(attrs(profile_id, Some(kind)))?
+                .into_iter()
+                .next()
+            else {
                 return Ok(None);
             };
-            Ok(Some(String::from_utf8_lossy(&item.get_secret()?).into_owned()))
+            Ok(Some(
+                String::from_utf8_lossy(&item.get_secret()?).into_owned(),
+            ))
         };
         run().map_err(|e| e.to_string())
     }
@@ -289,7 +351,13 @@ impl SecretStore for SecretServiceStore {
                         }
                     }
                     None => {
-                        c.create_item(label, attrs(profile_id, Some(kind)), secret.as_bytes(), false, "text/plain")?;
+                        c.create_item(
+                            label,
+                            attrs(profile_id, Some(kind)),
+                            secret.as_bytes(),
+                            false,
+                            "text/plain",
+                        )?;
                     }
                 }
             }
@@ -331,9 +399,19 @@ pub mod testing {
 
     impl SecretStore for MemoryStore {
         fn get(&self, profile_id: &str, kind: Kind) -> Result<Option<String>, String> {
-            Ok(self.items.borrow().get(&(profile_id.to_string(), kind.attr())).map(|(_, s)| s.clone()))
+            Ok(self
+                .items
+                .borrow()
+                .get(&(profile_id.to_string(), kind.attr()))
+                .map(|(_, s)| s.clone()))
         }
-        fn set(&self, profile_id: &str, kind: Kind, label: &str, secret: &str) -> Result<(), String> {
+        fn set(
+            &self,
+            profile_id: &str,
+            kind: Kind,
+            label: &str,
+            secret: &str,
+        ) -> Result<(), String> {
             if self.fail == Some(kind) {
                 return Err("simulated failure".into());
             }
@@ -341,7 +419,9 @@ pub mod testing {
             if secret.is_empty() {
                 self.items.borrow_mut().remove(&key);
             } else {
-                self.items.borrow_mut().insert(key, (label.to_string(), secret.to_string()));
+                self.items
+                    .borrow_mut()
+                    .insert(key, (label.to_string(), secret.to_string()));
             }
             Ok(())
         }
@@ -349,7 +429,9 @@ pub mod testing {
             if self.fail_delete {
                 return Err("simulated failure".into());
             }
-            self.items.borrow_mut().retain(|(id, _), _| id != profile_id);
+            self.items
+                .borrow_mut()
+                .retain(|(id, _), _| id != profile_id);
             Ok(())
         }
     }
@@ -367,7 +449,12 @@ mod tests {
     }
 
     fn set_op(p: &Profile, kind: Kind, secret: &str) -> Op {
-        Op::Set { profile_id: p.id.clone(), kind, label: item_label(p.name.as_str(), kind), secret: secret.into() }
+        Op::Set {
+            profile_id: p.id.clone(),
+            kind,
+            label: item_label(p.name.as_str(), kind),
+            secret: secret.into(),
+        }
     }
 
     #[test]
@@ -381,10 +468,16 @@ mod tests {
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.profiles[0].psk = "k1".into();
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&cfg.profiles[0], Kind::Psk, "k1")]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Psk, "k1")]
+        );
         let mut cleared = cfg.clone();
         cleared.profiles[0].psk.clear();
-        assert_eq!(plan(&cfg, &cleared), vec![set_op(&cfg.profiles[0], Kind::Psk, "")]);
+        assert_eq!(
+            plan(&cfg, &cleared),
+            vec![set_op(&cfg.profiles[0], Kind::Psk, "")]
+        );
     }
 
     #[test]
@@ -392,9 +485,16 @@ mod tests {
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.profiles[0].auth.password = "pw".into();
-        assert_eq!(plan(&saved, &cfg), vec![], "save_password off: nothing to store");
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![],
+            "save_password off: nothing to store"
+        );
         cfg.profiles[0].auth.save_password = true;
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&cfg.profiles[0], Kind::Password, "pw")]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Password, "pw")]
+        );
     }
 
     #[test]
@@ -404,7 +504,10 @@ mod tests {
         saved.profiles[0].auth.save_password = true;
         let mut cfg = saved.clone();
         cfg.profiles[0].auth.save_password = false;
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&cfg.profiles[0], Kind::Password, "")]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Password, "")]
+        );
     }
 
     #[test]
@@ -413,7 +516,10 @@ mod tests {
         saved.profiles[0].psk = "k".into();
         let mut cfg = saved.clone();
         cfg.profiles[0].name = "Home".into();
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&cfg.profiles[0], Kind::Psk, "k")]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Psk, "k")]
+        );
     }
 
     #[test]
@@ -431,10 +537,19 @@ mod tests {
         let mut cfg = saved.clone();
         let copy = cfg.profiles[0].duplicate();
         cfg.profiles.push(copy.clone());
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&copy, Kind::Psk, "k")], "copy stores under its own id");
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&copy, Kind::Psk, "k")],
+            "copy stores under its own id"
+        );
         let mut removed = cfg.clone();
         removed.profiles.remove(0);
-        assert_eq!(plan(&cfg, &removed), vec![Op::DeleteProfile { profile_id: cfg.profiles[0].id.clone() }]);
+        assert_eq!(
+            plan(&cfg, &removed),
+            vec![Op::DeleteProfile {
+                profile_id: cfg.profiles[0].id.clone()
+            }]
+        );
     }
 
     #[test]
@@ -448,8 +563,20 @@ mod tests {
             store.set(&p.id, Kind::Password, "l", "pw").unwrap();
         }
         assert!(fill(&store, &mut cfg).is_empty());
-        assert_eq!((cfg.profiles[0].psk.as_str(), cfg.profiles[0].auth.password.as_str()), ("k", ""));
-        assert_eq!((cfg.profiles[1].psk.as_str(), cfg.profiles[1].auth.password.as_str()), ("k", "pw"));
+        assert_eq!(
+            (
+                cfg.profiles[0].psk.as_str(),
+                cfg.profiles[0].auth.password.as_str()
+            ),
+            ("k", "")
+        );
+        assert_eq!(
+            (
+                cfg.profiles[1].psk.as_str(),
+                cfg.profiles[1].auth.password.as_str()
+            ),
+            ("k", "pw")
+        );
     }
 
     #[test]
@@ -461,35 +588,60 @@ mod tests {
         let (next, errors) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
         assert!(errors.is_empty());
         assert!(next.settings_eq(&cfg));
-        assert_eq!(store.get(&cfg.profiles[0].id, Kind::Psk).unwrap().as_deref(), Some("k"));
+        assert_eq!(
+            store
+                .get(&cfg.profiles[0].id, Kind::Psk)
+                .unwrap()
+                .as_deref(),
+            Some("k")
+        );
         let (label, _) = store.items.borrow()[&(cfg.profiles[0].id.clone(), "psk")].clone();
         assert_eq!(label, "Archway VPN: Office (PSK)");
     }
 
     #[test]
     fn failed_set_keeps_profile_unsaved() {
-        let store = MemoryStore { fail: Some(Kind::Psk), ..Default::default() };
+        let store = MemoryStore {
+            fail: Some(Kind::Psk),
+            ..Default::default()
+        };
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.profiles[0].psk = "k".into();
         let (next, errors) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
-        assert_eq!(errors, vec![
-            "error: the PSK couldn't be saved to the keyring\n  note: simulated failure\n  help: your other settings were saved; click Save to try again"
-        ]);
+        assert_eq!(
+            errors,
+            vec![
+                "error: the PSK couldn't be saved to the keyring\n  note: simulated failure\n  help: your other settings were saved; click Save to try again"
+            ]
+        );
         assert!(!next.settings_eq(&cfg), "still unsaved");
-        assert_eq!(plan(&next, &cfg), vec![set_op(&cfg.profiles[0], Kind::Psk, "k")], "retried on next Save");
+        assert_eq!(
+            plan(&next, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Psk, "k")],
+            "retried on next Save"
+        );
     }
 
     #[test]
     fn failed_delete_keeps_profile_pending() {
-        let store = MemoryStore { fail_delete: true, ..Default::default() };
+        let store = MemoryStore {
+            fail_delete: true,
+            ..Default::default()
+        };
         let mut saved = cfg_with("Office");
         saved.profiles.push(Profile::default());
         let mut cfg = saved.clone();
         let gone = cfg.profiles.remove(1);
         let (next, errors) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
         assert_eq!(errors.len(), 1);
-        assert_eq!(plan(&next, &cfg), vec![Op::DeleteProfile { profile_id: gone.id }], "retried on next Save");
+        assert_eq!(
+            plan(&next, &cfg),
+            vec![Op::DeleteProfile {
+                profile_id: gone.id
+            }],
+            "retried on next Save"
+        );
     }
 
     #[test]
@@ -497,7 +649,12 @@ mod tests {
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.orphans = vec!["B".repeat(32)];
-        assert_eq!(plan(&saved, &cfg), vec![Op::DeleteProfile { profile_id: "B".repeat(32) }]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![Op::DeleteProfile {
+                profile_id: "B".repeat(32)
+            }]
+        );
 
         let store = MemoryStore::default();
         store.set(&"B".repeat(32), Kind::Psk, "l", "k").unwrap();
@@ -505,11 +662,17 @@ mod tests {
         assert!(errors.is_empty() && next.orphans.is_empty());
         assert_eq!(store.get(&"B".repeat(32), Kind::Psk).unwrap(), None);
 
-        let failing = MemoryStore { fail_delete: true, ..Default::default() };
+        let failing = MemoryStore {
+            fail_delete: true,
+            ..Default::default()
+        };
         let (next, errors) = apply(&failing, &plan(&saved, &cfg), &saved, &cfg);
         assert_eq!(errors.len(), 1);
         assert_eq!(next.orphans, cfg.orphans, "retried on next Save");
-        assert_eq!(next.profiles, cfg.profiles, "an orphan never comes back as a profile");
+        assert_eq!(
+            next.profiles, cfg.profiles,
+            "an orphan never comes back as a profile"
+        );
     }
 
     #[test]
@@ -521,7 +684,8 @@ mod tests {
              help: they're kept in memory until you close the app; restart to try again"
         );
         assert_eq!(
-            Unavailable::NoService("no secret service provider or dbus session found".into()).message(),
+            Unavailable::NoService("no secret service provider or dbus session found".into())
+                .message(),
             "warning: the PSK and password can't be saved\n  \
              note: no keyring service found: no secret service provider or dbus session found \
              (is GNOME Keyring, KWallet or KeePassXC running?)\n  \
@@ -538,15 +702,30 @@ mod tests {
         let label = item_label("test", Kind::Psk);
         s.set(id, Kind::Psk, &label, "s3cret").unwrap();
         assert_eq!(s.get(id, Kind::Psk).unwrap().as_deref(), Some("s3cret"));
-        s.set(id, Kind::Psk, &item_label("renamed", Kind::Psk), "changed").unwrap();
+        s.set(id, Kind::Psk, &item_label("renamed", Kind::Psk), "changed")
+            .unwrap();
         assert_eq!(s.get(id, Kind::Psk).unwrap().as_deref(), Some("changed"));
         let c = s.collection().unwrap();
         let items = c.search_items(attrs(id, Some(Kind::Psk))).unwrap();
         assert_eq!(items.len(), 1, "replaced, not duplicated");
-        assert_eq!(items[0].get_label().unwrap(), "Archway VPN: renamed (PSK)", "label follows a rename");
-        s.set(id, Kind::Password, &item_label("test", Kind::Password), "pw").unwrap();
+        assert_eq!(
+            items[0].get_label().unwrap(),
+            "Archway VPN: renamed (PSK)",
+            "label follows a rename"
+        );
+        s.set(
+            id,
+            Kind::Password,
+            &item_label("test", Kind::Password),
+            "pw",
+        )
+        .unwrap();
         s.set(id, Kind::Password, "", "").unwrap();
-        assert_eq!(s.get(id, Kind::Password).unwrap(), None, "empty secret deletes");
+        assert_eq!(
+            s.get(id, Kind::Password).unwrap(),
+            None,
+            "empty secret deletes"
+        );
         s.delete_profile(id).unwrap();
         assert_eq!(s.get(id, Kind::Psk).unwrap(), None);
     }
@@ -568,25 +747,41 @@ mod tests {
         cfg.profiles.push(cfg.profiles[0].clone());
         let saved = cfg.clone();
         cfg.dedupe_ids();
-        assert_eq!(plan(&saved, &cfg), vec![set_op(&cfg.profiles[1], Kind::Psk, "shared")]);
+        assert_eq!(
+            plan(&saved, &cfg),
+            vec![set_op(&cfg.profiles[1], Kind::Psk, "shared")]
+        );
     }
 
     #[test]
     fn failed_set_reverts_only_that_secret() {
-        let store = MemoryStore { fail: Some(Kind::Psk), ..Default::default() };
+        let store = MemoryStore {
+            fail: Some(Kind::Psk),
+            ..Default::default()
+        };
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.profiles[0].psk = "k".into();
         cfg.profiles[0].auth.password = "pw".into();
         cfg.profiles[0].auth.save_password = true;
         let (next, _) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
-        assert_eq!(next.profiles[0].auth.password, "pw", "password write succeeded, so it counts as saved");
-        assert_eq!(plan(&next, &cfg), vec![set_op(&cfg.profiles[0], Kind::Psk, "k")], "only the PSK is retried");
+        assert_eq!(
+            next.profiles[0].auth.password, "pw",
+            "password write succeeded, so it counts as saved"
+        );
+        assert_eq!(
+            plan(&next, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Psk, "k")],
+            "only the PSK is retried"
+        );
     }
 
     #[test]
     fn failed_untick_save_password_is_retried() {
-        let store = MemoryStore { fail: Some(Kind::Password), ..Default::default() };
+        let store = MemoryStore {
+            fail: Some(Kind::Password),
+            ..Default::default()
+        };
         let mut saved = cfg_with("Office");
         saved.profiles[0].auth.password = "pw".into();
         saved.profiles[0].auth.save_password = true;
@@ -594,12 +789,20 @@ mod tests {
         cfg.profiles[0].auth.save_password = false;
         let (next, _) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
         assert!(!next.settings_eq(&cfg), "still unsaved");
-        assert_eq!(plan(&next, &cfg), vec![set_op(&cfg.profiles[0], Kind::Password, "")]);
+        assert_eq!(
+            plan(&next, &cfg),
+            vec![set_op(&cfg.profiles[0], Kind::Password, "")]
+        );
     }
 
     #[test]
     fn op_debug_redacts_secret() {
-        let op = Op::Set { profile_id: "id".into(), kind: Kind::Psk, label: "l".into(), secret: "hunter2".into() };
+        let op = Op::Set {
+            profile_id: "id".into(),
+            kind: Kind::Psk,
+            label: "l".into(),
+            secret: "hunter2".into(),
+        };
         let s = format!("{op:?}");
         assert!(!s.contains("hunter2") && s.contains("<redacted>"), "{s}");
     }

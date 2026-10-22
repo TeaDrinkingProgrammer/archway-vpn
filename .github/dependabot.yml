@@ -1,0 +1,33 @@
+# Security updates aren't scheduled: Dependabot opens them as soon as an advisory is published (enable "Dependabot
+# security updates" in the repository settings). The deny workflow also checks Cargo.lock weekly.
+# Everything else is a monthly version update, grouped into one pull request per ecosystem.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      dependencies:
+        applies-to: version-updates
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]

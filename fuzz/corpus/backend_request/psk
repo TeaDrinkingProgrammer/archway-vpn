@@ -1,0 +1,1 @@
+{"gateway":"192.0.2.1","ike_port":4500,"psk":"k","auth":"PskOnly","local_id":"client.example.com","dh_groups":[14,19],"ike_proposals":["aes256-sha256"],"esp_proposals":["aes256-sha256","aes128-sha1"],"natt_keepalive":5,"ifname":"vpn-1","mtu":576,"routes":"Full","block_ipv6":false,"set_dns":false,"verbose":true}

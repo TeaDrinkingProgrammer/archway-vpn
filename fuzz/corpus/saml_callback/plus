@@ -1,0 +1,2 @@
+GET /?username=a+b&tokenid=%zz%4 HTTP/1.0
+

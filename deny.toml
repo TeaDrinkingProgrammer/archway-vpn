@@ -1,0 +1,33 @@
+# cargo deny check: known vulnerabilities, dependency licenses and where dependencies come from.
+# Runs in .github/workflows/deny.yml.
+
+[graph]
+# Archway only builds for Linux; ignore the Windows/macOS/Android dependency trees
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[advisories]
+# unmaintained crates are reported too, but only for direct dependencies: a deep one isn't ours to replace
+unmaintained = "workspace"
+
+[licenses]
+# everything compatible with shipping Archway under MIT OR Apache-2.0
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+# the egui/winit stack pulls in a few crates twice; worth knowing, not worth failing over
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
