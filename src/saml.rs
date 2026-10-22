@@ -51,6 +51,80 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
+/// The `tokenid` and `username` of the browser's callback request `req` (the raw HTTP request, at least up to the end
+/// of its headers), each None when the query doesn't have it. Err for a request that can't be the browser coming back
+/// from the login: anything but a GET of `/`, or one a web page sent itself (a script's fetch or form, an image, a
+/// frame) instead of the FortiGate's top-level redirect. The FortiGate builds the callback URL, so it can't carry a
+/// nonce of ours; these checks keep other pages from slipping in a token of their own.
+pub fn callback_params(req: &[u8]) -> Result<(Option<String>, Option<String>), &'static str> {
+    let text = String::from_utf8_lossy(req);
+    let mut lines = text.lines();
+    let mut request = lines.next().unwrap_or("").split_whitespace();
+    let (method, target) = (request.next().unwrap_or(""), request.next().unwrap_or(""));
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if method != "GET" || path != "/" {
+        return Err("not a GET of /");
+    }
+    for line in lines.take_while(|l| !l.is_empty()) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (name, value) = (name.trim().to_ascii_lowercase(), value.trim());
+        // browsers send Origin with a script's request and a form post, never with a top-level GET navigation
+        if name == "origin" {
+            return Err("sent by a script on a web page");
+        }
+        // Sec-Fetch-Dest says what the request is for; the FortiGate's redirect is a "document"
+        if name == "sec-fetch-dest" && !value.eq_ignore_ascii_case("document") {
+            return Err("not a page navigation");
+        }
+    }
+    Ok((
+        query_param(query, "tokenid"),
+        query_param(query, "username"),
+    ))
+}
+
+/// The uid of the process that owns the local end `peer` of a TCP connection to `ours`, from /proc/net/tcp. Ok(None)
+/// when the connection isn't in the table (already closed, or not IPv4); Err when the table can't be read (no /proc).
+fn peer_uid(
+    ours: std::net::SocketAddr,
+    peer: std::net::SocketAddr,
+) -> std::io::Result<Option<u32>> {
+    let addr = |a: std::net::SocketAddr| match a {
+        // as the kernel prints it: the address's bytes as one host-order u32, then the port
+        std::net::SocketAddr::V4(a) => Some(format!(
+            "{:08X}:{:04X}",
+            u32::from_ne_bytes(a.ip().octets()),
+            a.port()
+        )),
+        std::net::SocketAddr::V6(_) => None,
+    };
+    let table = std::fs::read_to_string("/proc/net/tcp")?;
+    let (Some(ours), Some(peer)) = (addr(ours), addr(peer)) else {
+        return Ok(None);
+    };
+    Ok(table.lines().skip(1).find_map(|l| {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        (f.get(1) == Some(&peer.as_str()) && f.get(2) == Some(&ours.as_str()))
+            .then(|| f.get(7)?.parse().ok())?
+    }))
+}
+
+/// Whether the connection from `peer` to `ours` comes from another user's process. Checked right after accept, while
+/// the connection is surely still open: a connection that's gone from the table can't be told apart from another
+/// user's that sent its request and reset at once, so it counts as someone else's. Only without /proc/net/tcp is
+/// there nothing to check.
+fn from_another_user(ours: std::net::SocketAddr, peer: std::net::SocketAddr) -> bool {
+    // SAFETY: geteuid has no preconditions and can't fail.
+    let me = unsafe { libc::geteuid() };
+    match peer_uid(ours, peer) {
+        Ok(Some(uid)) => uid != me,
+        Ok(None) => true,
+        Err(_) => false,
+    }
+}
+
 pub struct SamlParams {
     pub gateway: crate::net::Host,
     pub port: crate::net::Port,
@@ -197,7 +271,10 @@ pub fn login(
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("callback listener: {e}"))?;
     listener.set_nonblocking(true).ok();
-    let rport = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let local = listener
+        .local_addr()
+        .map_err(|e| format!("callback listener: {e}"))?;
+    let rport = local.port();
 
     log(format!(
         "SAML: POST https://{}:{}/saml_login? (UID={}, REDIRECT_PORT={rport})",
@@ -280,7 +357,7 @@ pub fn login(
         if cancel.load(Ordering::SeqCst) {
             return Err("cancelled".into());
         }
-        let (mut s, _) = match listener.accept() {
+        let (mut s, peer) = match listener.accept() {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(150));
@@ -288,6 +365,15 @@ pub fn login(
             }
             Err(e) => return Err(format!("callback listener: {e}")),
         };
+        // only the browser of the user running the app may hand over the token, not another user's process;
+        // checked before reading, so such a connection is dropped at once and can't stall the real callback
+        if from_another_user(local, peer) {
+            log(
+                "SAML: ignored a connection on the callback port (from another user's process)"
+                    .into(),
+            );
+            continue;
+        }
         s.set_nonblocking(false).ok();
         s.set_read_timeout(Some(Duration::from_secs(5))).ok();
         let mut req = Vec::new();
@@ -298,14 +384,18 @@ pub fn login(
                 Ok(n) => req.extend_from_slice(&buf[..n]),
             }
         }
-        let text = String::from_utf8_lossy(&req);
-        let target = text
-            .lines()
-            .next()
-            .and_then(|l| l.split_whitespace().nth(1))
-            .unwrap_or("");
-        let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
-        let token = query_param(query, "tokenid");
+        let (token, username) = match callback_params(&req) {
+            Ok(p) => p,
+            Err(why) => {
+                log(format!(
+                    "SAML: ignored a request on the callback port ({why})"
+                ));
+                let _ = s.write_all(
+                    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                continue;
+            }
+        };
         let resp = if token.is_some() {
             format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{DONE_PAGE}",
@@ -316,7 +406,7 @@ pub fn login(
         };
         let _ = s.write_all(resp.as_bytes());
         if let Some(token) = token.filter(|t| !t.is_empty()) {
-            let username = query_param(query, "username").unwrap_or_default();
+            let username = username.unwrap_or_default();
             log(format!(
                 "SAML: success, username={username}, tokenid=<{} chars>",
                 token.len()
@@ -330,6 +420,47 @@ pub fn login(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_browsers_redirect_is_a_callback() {
+        let ok = b"GET /?tokenid=t%2B1&username=jane HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nSec-Fetch-Dest: document\r\n\r\n";
+        assert_eq!(
+            callback_params(ok),
+            Ok((Some("t+1".into()), Some("jane".into())))
+        );
+        // no Sec-Fetch headers at all (an older browser): still the redirect
+        assert!(callback_params(b"GET /?tokenid=t HTTP/1.1\r\n\r\n").is_ok());
+        for bad in [
+            &b"POST /?tokenid=t HTTP/1.1\r\n\r\n"[..],
+            b"GET /other?tokenid=t HTTP/1.1\r\n\r\n",
+            b"GET /?tokenid=t HTTP/1.1\r\nOrigin: https://evil.example\r\n\r\n",
+            b"GET /?tokenid=t HTTP/1.1\r\nsec-fetch-dest: image\r\n\r\n",
+            b"GET /?tokenid=t HTTP/1.1\r\nSec-Fetch-Dest: iframe\r\n\r\n",
+        ] {
+            assert!(
+                callback_params(bad).is_err(),
+                "{}",
+                String::from_utf8_lossy(bad)
+            );
+        }
+    }
+
+    #[test]
+    fn the_peer_of_a_local_connection_is_this_user() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let c = std::net::TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (_s, peer) = l.accept().unwrap();
+        assert_eq!(peer, c.local_addr().unwrap());
+        // SAFETY: geteuid has no preconditions and can't fail.
+        let me = unsafe { libc::geteuid() };
+        let ours = l.local_addr().unwrap();
+        assert_eq!(peer_uid(ours, peer).unwrap(), Some(me));
+        assert!(!from_another_user(ours, peer));
+        // a connection that's no longer in the table (sent its request and reset) can't be shown to be ours
+        let gone: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        assert_eq!(peer_uid(ours, gone).unwrap(), None);
+        assert!(from_another_user(ours, gone));
+    }
 
     #[test]
     fn percent_before_a_multibyte_character_is_kept() {
