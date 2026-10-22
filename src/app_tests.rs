@@ -928,6 +928,62 @@ fn close_dialog_cannot_save_with_problems() {
 }
 
 #[test]
+fn another_sso_account_than_last_time_is_a_warning() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    app.state = State::Authenticating;
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    // texts on screen after a frame (the first frame only lays out)
+    let texts = |app: &mut App| {
+        app_frame(&ctx, app, vec![]);
+        app_frame(&ctx, app, vec![])
+            .0
+            .iter()
+            .filter_map(|(_, n)| n.label().or(n.value()).map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let ok = |u: &str| BackendEvent::SamlOk { username: u.into() };
+    app.on_backend(ok("jane"));
+    assert_eq!(
+        app.info.previous_user, None,
+        "the first login only records the account"
+    );
+    app.info = TunnelInfo::default();
+    app.on_backend(ok("jane"));
+    assert_eq!(app.info.previous_user, None);
+    let shown = texts(&mut app);
+    assert!(
+        shown.iter().any(|t| t.ends_with("Signed in as jane")),
+        "{shown:?}"
+    );
+    assert!(!shown.iter().any(|t| t.starts_with("Last time")));
+    // a forged callback signs in with the attacker's account
+    app.info = TunnelInfo::default();
+    app.on_backend(ok("mallory"));
+    assert_eq!(app.info.previous_user.as_deref(), Some("jane"));
+    assert!(
+        app.log
+            .iter()
+            .any(|l| l.contains("signed in as mallory, last time as jane"))
+    );
+    let shown = texts(&mut app);
+    assert!(
+        shown.iter().any(|t| t == "Signed in as mallory."),
+        "{shown:?}"
+    );
+    assert!(
+        shown
+            .iter()
+            .any(|t| t.starts_with("Last time this connection signed in as jane."))
+    );
+    // remembered across restarts
+    let again = app_with(&MemoryStore::default());
+    let id = &again.cfg.profiles[again.profile_connected].id;
+    assert_eq!(SsoUsers::load(&Paths::from_env()).get(id), Some("mallory"));
+}
+
+#[test]
 fn backend_events_drive_the_status() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());

@@ -390,6 +390,42 @@ impl Paths {
     pub fn state_file(&self) -> PathBuf {
         self.state_dir.join("state.json")
     }
+    /// The account each connection last signed in with over SSO, by profile id (see `SsoUsers`).
+    pub fn sso_users_file(&self) -> PathBuf {
+        self.state_dir.join("sso-users.json")
+    }
+}
+
+/// The account each connection last signed in with over SSO, by profile id. The FortiGate's callback can't be tied to
+/// the login Archway started (the FortiGate builds the URL), so a forged one would sign you in as someone else; a
+/// change of account is shown as a warning. Its own file: it changes on every login, not on Save.
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SsoUsers(BTreeMap<String, String>);
+
+impl SsoUsers {
+    /// Missing or unreadable: empty, so the next login just records its account.
+    pub fn load(paths: &Paths) -> Self {
+        std::fs::read_to_string(paths.sso_users_file())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    /// Record that profile `id` signed in as `user`; returns the account it used before, if that was another one.
+    pub fn record(&mut self, id: &str, user: &str) -> Option<String> {
+        let before = self.0.insert(id.to_string(), user.to_string());
+        before.filter(|b| b != user)
+    }
+
+    #[cfg(test)]
+    pub fn get(&self, id: &str) -> Option<&str> {
+        self.0.get(id).map(String::as_str)
+    }
+
+    pub fn save(&self, paths: &Paths) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self).expect("a map of strings serializes");
+        write_private(&paths.sso_users_file(), json.as_bytes())
+    }
 }
 
 pub fn config_path() -> PathBuf {
@@ -764,6 +800,24 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Temp config + state dirs, removed on drop.
+    #[test]
+    fn sso_users_report_a_changed_account() {
+        let t = Tmp::new();
+        let mut u = SsoUsers::load(&t.paths);
+        assert_eq!(u.record("a", "jane"), None);
+        assert_eq!(u.record("a", "jane"), None);
+        assert_eq!(u.record("b", "bob"), None, "per connection");
+        assert_eq!(u.record("a", "mallory"), Some("jane".into()));
+        u.save(&t.paths).unwrap();
+        assert_eq!(SsoUsers::load(&t.paths), u);
+        std::fs::write(t.paths.sso_users_file(), "not json").unwrap();
+        assert_eq!(
+            SsoUsers::load(&t.paths),
+            SsoUsers::default(),
+            "unreadable: start over"
+        );
+    }
+
     struct Tmp {
         dir: PathBuf,
         paths: Paths,

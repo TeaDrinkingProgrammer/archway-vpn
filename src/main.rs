@@ -78,6 +78,8 @@ impl State {
 #[derive(Default, Clone)]
 struct TunnelInfo {
     username: String,
+    /// the SSO account this connection signed in with last time, when it was another one than `username`
+    previous_user: Option<String>,
     ip: Option<Ipv4Addr>,
     routes: Vec<Ipv4Net>,
     full_tunnel: bool,
@@ -105,6 +107,8 @@ struct App {
     log: Vec<String>,
     error: Option<String>,
     info: TunnelInfo,
+    /// the account each connection last signed in with over SSO
+    sso_users: SsoUsers,
     since: Option<Instant>,
     /// when Connect was clicked; drives the "no answer yet" notice
     connect_started: Option<Instant>,
@@ -169,6 +173,7 @@ impl App {
             log: Vec::new(),
             error: None,
             info: TunnelInfo::default(),
+            sso_users: SsoUsers::load(&Paths::from_env()),
             since: None,
             connect_started: None,
             fix_focus: None,
@@ -470,6 +475,18 @@ impl App {
         match ev {
             BackendEvent::SamlUrl { url } => self.info.saml_url = url,
             BackendEvent::SamlOk { username } => {
+                if !username.is_empty() {
+                    let id = self.cfg.profiles[self.profile_connected].id.clone();
+                    self.info.previous_user = self.sso_users.record(&id, &username);
+                    if let Some(before) = &self.info.previous_user {
+                        self.push_log(format!(
+                            "warning: signed in as {username}, last time as {before}"
+                        ));
+                    }
+                    if let Err(e) = self.sso_users.save(&Paths::from_env()) {
+                        self.push_log(format!("warning: the SSO account couldn't be saved: {e}"));
+                    }
+                }
                 self.info.username = username;
                 self.want_attention = true;
             }

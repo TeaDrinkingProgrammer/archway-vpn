@@ -721,6 +721,36 @@ impl App {
     /// What the user has to do while connecting: sign in in the browser, or enter the root password.
     fn sign_in_help(&mut self, ui: &mut Ui) {
         let t = theme::tokens(ui);
+        // after SSO: which account the browser signed in with, and a warning when it's another one than last time
+        if !self.info.username.is_empty() && self.state != State::Idle {
+            if let Some(before) = &self.info.previous_user {
+                theme::banner(ui, BannerKind::Warning, icon::TRIANGLE_ALERT, |ui| {
+                    ui.label(theme::title(
+                        ui,
+                        format!("Signed in as {}.", self.info.username),
+                        16.0,
+                    ));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "Last time this connection signed in as {before}. If you didn't sign in with this account, disconnect."
+                            ))
+                            .color(t.text),
+                        )
+                        .wrap(),
+                    );
+                });
+            } else {
+                ui.label(theme::with_icon(
+                    ui,
+                    icon::LOG_IN,
+                    &format!("Signed in as {}", self.info.username),
+                    14.0,
+                    t.secondary,
+                    false,
+                ));
+            }
+        }
         if self.state == State::Authenticating && !self.info.saml_url.is_empty() {
             theme::banner(ui, BannerKind::Info, icon::LOG_IN, |ui| {
                 ui.label(theme::title(ui, "Finish signing in in your browser.", 16.0));
