@@ -34,6 +34,9 @@ jobs:
         run: cargo fmt --check
       - name: cargo clippy
         run: cargo clippy --locked --all-targets -- -D warnings
+      # the library the fuzz targets in fuzz/ build against
+      - name: cargo clippy (fuzzing feature)
+        run: cargo clippy --locked --all-targets --features fuzzing -- -D warnings
       - name: cargo test
         run: cargo test --locked
       - name: cargo doc

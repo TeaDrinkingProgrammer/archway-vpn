@@ -1,0 +1,32 @@
+description = "Office"
+gateway = "vpn.example.com"
+
+[sso]
+enabled = false
+port = 10443
+open_browser = false
+verify_cert = true
+timeout = 60
+
+[auth]
+mode = "Eap"
+username = "CORP\\jane"
+save_password = true
+
+[ike]
+port = 4500
+proposals = ["aes256-sha384", "aes128-sha1"]
+dh_groups = [14, 19, 20, 21]
+local_id = "client.example.com"
+natt_keepalive = 30
+
+[esp]
+proposals = ["aes256-sha256"]
+
+[network]
+route_mode = "Custom"
+custom_routes = ["10.0.0.0/8", "192.168.10.0/24"]
+block_ipv6 = false
+set_dns = false
+ifname = "vpn-office"
+mtu = 1380

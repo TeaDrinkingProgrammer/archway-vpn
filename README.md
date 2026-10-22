@@ -218,4 +218,6 @@ cargo test                       # unit tests: value checks, VICI, charon config
 ./scripts/netns-test.sh          # kernel tests, each in a throwaway network namespace (no root needed)
 ```
 
+`fuzz/` has libFuzzer targets for every parser that reads input from outside the app; see `fuzz/README.md`.
+
 End to end: connect with the app (turn on verbose logging in Settings) and check the tunnel with `ip -br addr show archway0` and `ip route show proto 233`.

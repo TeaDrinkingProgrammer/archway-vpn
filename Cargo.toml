@@ -10,6 +10,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
 homepage = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
 
+[features]
+# Builds src/lib.rs, which exposes the parsers to the fuzz targets in fuzz/ (see fuzz/README.md). The app never needs it.
+fuzzing = []
+
 [dependencies]
 async-io = "2.6.0"
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "glow", "links", "wayland", "x11"] }

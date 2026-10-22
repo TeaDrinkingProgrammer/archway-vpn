@@ -225,7 +225,9 @@ impl Vici {
         Ok(Self { stream })
     }
 
-    #[cfg(test)]
+    /// A client on an already connected stream: the tests and fuzz targets put a fake charon on the other end.
+    #[cfg(any(test, feature = "fuzzing"))]
+    #[allow(dead_code)] // the app itself only connects to a socket path
     pub fn from_stream(stream: UnixStream) -> Self {
         Self { stream }
     }

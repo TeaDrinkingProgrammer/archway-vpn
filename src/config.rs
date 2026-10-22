@@ -433,7 +433,7 @@ pub fn config_path() -> PathBuf {
 }
 
 /// TOML of `v` without the keys whose value equals the default, at any depth, and without tables left empty.
-fn sparse<T: Serialize + Default>(v: &T) -> String {
+pub fn sparse<T: Serialize + Default>(v: &T) -> String {
     fn prune(t: &mut toml::Table, d: &toml::Table) {
         t.retain(|k, v| match (v, d.get(k)) {
             (toml::Value::Table(t), Some(toml::Value::Table(d))) => {
@@ -459,7 +459,7 @@ fn is_outdated(path: &Path, p: &Profile) -> bool {
 }
 
 /// A profile file's settings; id and name are left for the caller.
-fn parse_profile(s: &str) -> Result<Profile, String> {
+pub fn parse_profile(s: &str) -> Result<Profile, String> {
     toml::from_str(s).map_err(|e| e.to_string())
 }
 

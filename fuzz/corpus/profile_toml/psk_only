@@ -1,0 +1,7 @@
+gateway = "192.0.2.1"
+[sso]
+enabled = false
+[auth]
+mode = "None"
+[network]
+route_mode = "Full"

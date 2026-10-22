@@ -44,7 +44,7 @@ pub fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into()
 }
 
-fn query_param(query: &str, key: &str) -> Option<String> {
+pub fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
         let (k, v) = kv.split_once('=')?;
         (k == key).then(|| url_decode(v))
@@ -179,7 +179,7 @@ fn in_background<T: Send + 'static>(
 }
 
 /// The target of the page's `window.location="…"` script redirect.
-fn js_redirect(html: &str) -> Option<String> {
+pub fn js_redirect(html: &str) -> Option<String> {
     html.split_once("window.location=\"")
         .and_then(|(_, r)| r.split_once('"'))
         .map(|(u, _)| u.to_string())
@@ -188,7 +188,7 @@ fn js_redirect(html: &str) -> Option<String> {
 /// Given the FortiGate's SSO start page: the identity provider URL it only redirects to by script, when the browser can
 /// go there directly. Not when the page sets a cookie (the FortiGate would need it back when the IdP posts the answer)
 /// or the target isn't https.
-fn idp_from_start_page(head: &str, body: &str) -> Option<String> {
+pub fn idp_from_start_page(head: &str, body: &str) -> Option<String> {
     let ok = head
         .lines()
         .next()
@@ -250,7 +250,7 @@ fn skip_start_page(
 }
 
 /// `url` if the browser may open it: https only, so an answer like `file:///…` never reaches xdg-open.
-fn browser_url(url: &str) -> Result<String, String> {
+pub fn browser_url(url: &str) -> Result<String, String> {
     if url.starts_with("https://") {
         Ok(url.into())
     } else {

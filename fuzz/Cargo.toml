@@ -1,0 +1,87 @@
+[package]
+name = "archway-vpn-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+archway-vpn = { path = "..", features = ["fuzzing"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_vici = "0.1"
+vec1 = "1"
+libc = "0.2"
+
+# Its own workspace: the fuzz crate and its nightly-only dependencies stay out of the app's build.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "vici_packet"
+path = "fuzz_targets/vici_packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vici_session"
+path = "fuzz_targets/vici_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_response"
+path = "fuzz_targets/http_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "x509_blob"
+path = "fuzz_targets/x509_blob.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "profile_toml"
+path = "fuzz_targets/profile_toml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "backend_request"
+path = "fuzz_targets/backend_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "backend_event"
+path = "fuzz_targets/backend_event.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "saml_callback"
+path = "fuzz_targets/saml_callback.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_types"
+path = "fuzz_targets/net_types.rs"
+test = false
+doc = false
+bench = false

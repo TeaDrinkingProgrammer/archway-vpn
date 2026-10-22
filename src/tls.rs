@@ -85,7 +85,7 @@ pub fn split_http(buf: &[u8]) -> Result<(String, Vec<u8>), String> {
     Ok((head, body))
 }
 
-fn dechunk(mut b: &[u8]) -> Vec<u8> {
+pub fn dechunk(mut b: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     while let Some(p) = b.windows(2).position(|w| w == b"\r\n") {
         let n = usize::from_str_radix(
@@ -111,7 +111,7 @@ fn dechunk(mut b: &[u8]) -> Vec<u8> {
 }
 
 /// Extract certificates from DER, PEM or a PKCS#7 bundle (.p7c) by scanning for embedded X.509 SEQUENCE structures.
-fn certs_from_blob(data: &[u8]) -> Vec<CertificateDer<'static>> {
+pub fn certs_from_blob(data: &[u8]) -> Vec<CertificateDer<'static>> {
     if data.starts_with(b"-----BEGIN") {
         let text = String::from_utf8_lossy(data);
         return x509_parser::pem::Pem::iter_from_buffer(text.as_bytes())
@@ -136,7 +136,7 @@ fn certs_from_blob(data: &[u8]) -> Vec<CertificateDer<'static>> {
     out
 }
 
-fn aia_issuer_urls(der: &[u8]) -> Vec<String> {
+pub fn aia_issuer_urls(der: &[u8]) -> Vec<String> {
     use x509_parser::extensions::{GeneralName, ParsedExtension};
     let Ok((_, cert)) = x509_parser::parse_x509_certificate(der) else {
         return vec![];
