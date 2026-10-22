@@ -28,8 +28,10 @@ pub fn url_decode(s: &str) -> String {
         match b[i] {
             b'+' => out.push(b' '),
             b'%' if i + 2 < b.len() => {
-                if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                    out.push(v);
+                // on bytes: the two after `%` can be part of a multi-byte character, and slicing the &str there panics
+                let hex = |c: u8| (c as char).to_digit(16);
+                if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                    out.push((h * 16 + l) as u8);
                     i += 3;
                     continue;
                 }
@@ -328,6 +330,14 @@ pub fn login(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percent_before_a_multibyte_character_is_kept() {
+        // found by the saml_callback fuzzer: "%a" followed by "é" used to slice inside the character and panic
+        assert_eq!(url_decode("%a\u{e9}"), "%a\u{e9}");
+        assert_eq!(url_decode("%\u{e9}x"), "%\u{e9}x");
+        assert_eq!(url_decode("a%2Fb%zz"), "a/b%zz");
+    }
     #[test]
     fn decode() {
         assert_eq!(url_decode("user%40example.com"), "user@example.com");
