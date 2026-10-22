@@ -41,7 +41,8 @@ impl Diag {
 
     /// One diag as `Display` writes it; None for anything else (several joined, or free text).
     pub fn parse(s: &str) -> Option<Self> {
-        let mut lines = s.lines();
+        // split on \n only: lines() also drops a \r at the end of a line, so a note ending in \r didn't round-trip
+        let mut lines = s.strip_suffix('\n').unwrap_or(s).split('\n');
         let (level, headline) = lines.next()?.split_once(": ")?;
         let note = lines.next()?.strip_prefix("  note: ")?;
         let help = lines.next()?.strip_prefix("  help: ")?;
@@ -91,6 +92,13 @@ impl fmt::Display for Diag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_trailing_carriage_return_round_trips() {
+        // found by the backend_event fuzzer
+        let d = Diag::new("error", "x", "a note\r", "help");
+        assert_eq!(Diag::parse(&d.to_string()), Some(d));
+    }
 
     #[test]
     fn diag_round_trips() {
