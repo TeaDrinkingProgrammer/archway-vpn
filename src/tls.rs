@@ -97,11 +97,15 @@ fn dechunk(mut b: &[u8]) -> Vec<u8> {
             16,
         )
         .unwrap_or(0);
-        if n == 0 || p + 2 + n > b.len() {
+        // checked: a chunk size from the server can be anything, and p + 2 + n overflowed
+        let Some(end) = (p + 2)
+            .checked_add(n)
+            .filter(|&end| n > 0 && end <= b.len())
+        else {
             break;
-        }
-        out.extend_from_slice(&b[p + 2..p + 2 + n]);
-        b = &b[(p + 4 + n).min(b.len())..];
+        };
+        out.extend_from_slice(&b[p + 2..end]);
+        b = &b[(end + 2).min(b.len())..];
     }
     out
 }
@@ -384,6 +388,17 @@ fn https_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_huge_chunk_size_ends_the_body() {
+        // found by the http_response fuzzer: a chunk size near usize::MAX overflowed the bounds check and panicked
+        let (_, body) = split_http(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nxx\r\n",
+        )
+        .unwrap();
+        assert!(body.is_empty());
+        assert_eq!(dechunk(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n"), b"abcde");
+    }
 
     #[test]
     fn responses_over_the_cap_are_refused() {
