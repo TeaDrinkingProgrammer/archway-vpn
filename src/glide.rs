@@ -1,7 +1,9 @@
 //! Mouse-wheel scrolling that eases out instead of stopping dead: each notch adds distance, released over about
 //! 0.3 s. Touchpads (point deltas) pass through as they are.
 
-use eframe::egui::{Context, Event, Modifiers, MouseWheelUnit, RawInput, TouchPhase, Vec2};
+use eframe::egui::{
+    Context, Event, Modifiers, MouseWheelSource, MouseWheelUnit, RawInput, TouchPhase, Vec2,
+};
 
 /// How far a wheel notch scrolls, in points: about three lines, as on KDE and GNOME (egui's own is 40).
 const NOTCH: f32 = 60.0;
@@ -45,6 +47,7 @@ impl Glide {
             delta,
             phase,
             modifiers: self.modifiers,
+            source: MouseWheelSource::Unknown,
         };
         if self.left == Vec2::ZERO {
             if std::mem::take(&mut self.active) {
@@ -78,6 +81,7 @@ mod tests {
             delta,
             phase: TouchPhase::Move,
             modifiers: Modifiers::NONE,
+            source: MouseWheelSource::Unknown,
         }
     }
 

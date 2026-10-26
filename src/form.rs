@@ -254,7 +254,7 @@ pub fn warning_slot(ui: &mut egui::Ui, msg: Option<&str>) {
 
 /// The id of the text field for `key`, from the field, not from the layout.
 pub fn field_id(key: &DraftKey) -> egui::Id {
-    egui::Id::new(("form-field", key))
+    egui::Id::unique(("form-field", key))
 }
 
 /// A text field for `value`: shows the draft for `key` if there is one, else `show(value)`. Edits go through `parse`;

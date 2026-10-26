@@ -177,9 +177,7 @@ impl App {
         } else {
             shown.clone()
         };
-        r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, !busy, selected, &label)
-        });
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, !busy, selected, &label));
         let painter = ui.painter();
         if selected {
             painter.rect_filled(rect, egui::CornerRadius::same(10), t.selected);
@@ -393,7 +391,7 @@ impl App {
                         }
                         theme::copy_button(
                             ui,
-                            egui::Id::new("copy-log"),
+                            egui::Id::unique("copy-log"),
                             || self.log.join("\n"),
                             "Copy",
                             Some(96.0),
@@ -772,7 +770,7 @@ impl App {
                     }
                     theme::copy_button(
                         ui,
-                        egui::Id::new("copy-login-link"),
+                        egui::Id::unique("copy-login-link"),
                         || self.info.saml_url.clone(),
                         "Copy Link",
                         Some(124.0),
@@ -848,7 +846,7 @@ impl App {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     theme::copy_button(
                                         ui,
-                                        egui::Id::new("copy-ip"),
+                                        egui::Id::unique("copy-ip"),
                                         || ip.clone(),
                                         "Copy IP Address",
                                         None,
@@ -1424,7 +1422,7 @@ fn confirm(
     (tone, label): (Tone, &str),
 ) -> Option<bool> {
     let mut answer = None;
-    let modal = egui::Modal::new(egui::Id::new(id)).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {
         ui.set_max_width(400.0);
         ui.spacing_mut().item_spacing.y = 10.0;
         ui.label(theme::title(ui, title, 17.0));
@@ -1444,7 +1442,7 @@ fn confirm(
 
 /// The id of the password field for `what` ("psk", "password") of `owner`, so a fix button can focus it.
 fn secret_id(owner: &DraftOwner, what: &str) -> egui::Id {
-    egui::Id::new(("form-secret", owner, what))
+    egui::Id::unique(("form-secret", owner, what))
 }
 
 /// A password field with no draft: any text is valid.
