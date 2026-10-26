@@ -33,13 +33,27 @@ impl Tunnel {
     /// Create the xfrm interface. Done before the IKE negotiation, so charon can hand the VPN's DNS servers to
     /// resolvconf for this interface as soon as it gets them.
     pub fn create(o: &TunnelOpts, log: &dyn Fn(String)) -> Result<Tunnel, String> {
-        log(format!("creating xfrm interface {} (if_id {:#x})", o.ifname, netlink::IF_ID));
+        log(format!(
+            "creating xfrm interface {} (if_id {:#x})",
+            o.ifname,
+            netlink::IF_ID
+        ));
         let index = netlink::add_xfrm_link(&o.ifname)?;
-        Ok(Tunnel { undo: vec![Undo::Link(index)], index, routes: vec![], full: false })
+        Ok(Tunnel {
+            undo: vec![Undo::Link(index)],
+            index,
+            routes: vec![],
+            full: false,
+        })
     }
 
     /// Bring the interface up with what the gateway assigned. On error the caller runs `down`.
-    pub fn configure(&mut self, est: &Established, o: &TunnelOpts, log: &dyn Fn(String)) -> Result<(), String> {
+    pub fn configure(
+        &mut self,
+        est: &Established,
+        o: &TunnelOpts,
+        log: &dyn Fn(String),
+    ) -> Result<(), String> {
         netlink::link_up(self.index, o.mtu)?;
         netlink::add_addr(self.index, est.vip)?;
         let mut routes = o.routes.clone().unwrap_or_else(|| est.remote_ts.clone());
@@ -51,7 +65,10 @@ impl Tunnel {
             if netlink::add_route_via(host, via, oif)? {
                 self.undo.push(Undo::Route(host));
             } else {
-                log(format!("using the existing route to the gateway {}", est.gateway));
+                log(format!(
+                    "using the existing route to the gateway {}",
+                    est.gateway
+                ));
             }
             routes = Ipv4Net::HALVES.to_vec();
             if o.block_ipv6 {
@@ -70,7 +87,9 @@ impl Tunnel {
         if o.set_dns && self.full {
             // a DNS failure leaves a working tunnel: warn, don't fail
             if let Err(e) = resolved::route_all_queries(self.index.get()) {
-                log(format!("WARNING: DNS queries not routed through the VPN: {e}"));
+                log(format!(
+                    "WARNING: DNS queries not routed through the VPN: {e}"
+                ));
             }
         }
         Ok(())
@@ -106,7 +125,13 @@ mod tests {
     }
 
     fn opts(routes: Option<Vec<Ipv4Net>>) -> TunnelOpts {
-        TunnelOpts { ifname: "archwaytest0".parse().unwrap(), mtu: Mtu::try_from(1400).unwrap(), routes, block_ipv6: true, set_dns: false }
+        TunnelOpts {
+            ifname: "archwaytest0".parse().unwrap(),
+            mtu: Mtu::try_from(1400).unwrap(),
+            routes,
+            block_ipv6: true,
+            set_dns: false,
+        }
     }
 
     fn quiet(_: String) {}
@@ -115,13 +140,26 @@ mod tests {
     #[ignore]
     fn split_tunnel_up_and_down() {
         let mut t = Tunnel::create(&opts(None), &quiet).unwrap();
-        t.configure(&est(&["10.10.0.0/16", "10.20.0.0/16"]), &opts(None), &quiet).unwrap();
+        t.configure(&est(&["10.10.0.0/16", "10.20.0.0/16"]), &opts(None), &quiet)
+            .unwrap();
         assert!(!t.full);
         assert_eq!(t.routes.len(), 2);
-        assert!(netlink::link_index(&"archwaytest0".parse().unwrap()).unwrap().is_some());
+        assert!(
+            netlink::link_index(&"archwaytest0".parse().unwrap())
+                .unwrap()
+                .is_some()
+        );
         t.down(&quiet);
-        assert!(netlink::link_index(&"archwaytest0".parse().unwrap()).unwrap().is_none());
-        assert_eq!(netlink::purge(&"archwaytest0".parse().unwrap()).unwrap(), 0, "nothing left behind");
+        assert!(
+            netlink::link_index(&"archwaytest0".parse().unwrap())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            netlink::purge(&"archwaytest0".parse().unwrap()).unwrap(),
+            0,
+            "nothing left behind"
+        );
     }
 
     #[test]
@@ -131,16 +169,34 @@ mod tests {
         let up: IfName = "archwayup0".parse().unwrap();
         netlink::add_dummy_for_tests(&up, Ipv4Addr::new(192, 0, 2, 10), 24).unwrap();
         let ui = netlink::link_index(&up).unwrap().unwrap();
-        netlink::add_route_via("0.0.0.0/0".parse().unwrap(), Some(Ipv4Addr::new(192, 0, 2, 1)), ui).unwrap();
+        netlink::add_route_via(
+            "0.0.0.0/0".parse().unwrap(),
+            Some(Ipv4Addr::new(192, 0, 2, 1)),
+            ui,
+        )
+        .unwrap();
 
         let mut t = Tunnel::create(&opts(None), &quiet).unwrap();
-        t.configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet).unwrap();
+        t.configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet)
+            .unwrap();
         assert!(t.full);
         assert_eq!(t.routes, Ipv4Net::HALVES);
-        assert_eq!(netlink::route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap(), (Some(Ipv4Addr::new(192, 0, 2, 1)), ui), "gateway stays outside");
-        assert_eq!(netlink::route_to(Ipv4Addr::new(203, 0, 113, 9)).unwrap().1, t.index, "everything else goes in");
+        assert_eq!(
+            netlink::route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap(),
+            (Some(Ipv4Addr::new(192, 0, 2, 1)), ui),
+            "gateway stays outside"
+        );
+        assert_eq!(
+            netlink::route_to(Ipv4Addr::new(203, 0, 113, 9)).unwrap().1,
+            t.index,
+            "everything else goes in"
+        );
         t.down(&quiet);
-        assert_eq!(netlink::route_to(Ipv4Addr::new(203, 0, 113, 9)).unwrap().1, ui, "back to normal");
+        assert_eq!(
+            netlink::route_to(Ipv4Addr::new(203, 0, 113, 9)).unwrap().1,
+            ui,
+            "back to normal"
+        );
     }
 
     #[test]
@@ -150,13 +206,28 @@ mod tests {
         let up: IfName = "archwayup0".parse().unwrap();
         netlink::add_dummy_for_tests(&up, Ipv4Addr::new(192, 0, 2, 10), 24).unwrap();
         let ui = netlink::link_index(&up).unwrap().unwrap();
-        netlink::add_route_via("0.0.0.0/0".parse().unwrap(), Some(Ipv4Addr::new(192, 0, 2, 1)), ui).unwrap();
-        netlink::add_foreign_route_for_tests("198.51.100.7/32".parse().unwrap(), Ipv4Addr::new(192, 0, 2, 1), ui).unwrap();
+        netlink::add_route_via(
+            "0.0.0.0/0".parse().unwrap(),
+            Some(Ipv4Addr::new(192, 0, 2, 1)),
+            ui,
+        )
+        .unwrap();
+        netlink::add_foreign_route_for_tests(
+            "198.51.100.7/32".parse().unwrap(),
+            Ipv4Addr::new(192, 0, 2, 1),
+            ui,
+        )
+        .unwrap();
 
         let mut t = Tunnel::create(&opts(None), &quiet).unwrap();
-        t.configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet).unwrap();
+        t.configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet)
+            .unwrap();
         t.down(&quiet);
-        assert_eq!(netlink::route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap(), (Some(Ipv4Addr::new(192, 0, 2, 1)), ui), "still there");
+        assert_eq!(
+            netlink::route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap(),
+            (Some(Ipv4Addr::new(192, 0, 2, 1)), ui),
+            "still there"
+        );
     }
 
     #[test]
@@ -164,9 +235,19 @@ mod tests {
     fn failure_midway_undoes_earlier_steps() {
         // full tunnel without any route to the gateway: route_to fails after the interface exists
         let mut t = Tunnel::create(&opts(None), &quiet).unwrap();
-        let e = t.configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet).unwrap_err();
-        assert!(e.contains("198.51.100.7") || e.contains("unreachable"), "{e}");
+        let e = t
+            .configure(&est(&["0.0.0.0/0"]), &opts(None), &quiet)
+            .unwrap_err();
+        assert!(
+            e.contains("198.51.100.7") || e.contains("unreachable"),
+            "{e}"
+        );
         t.down(&quiet);
-        assert!(netlink::link_index(&"archwaytest0".parse().unwrap()).unwrap().is_none(), "interface removed again");
+        assert!(
+            netlink::link_index(&"archwaytest0".parse().unwrap())
+                .unwrap()
+                .is_none(),
+            "interface removed again"
+        );
     }
 }

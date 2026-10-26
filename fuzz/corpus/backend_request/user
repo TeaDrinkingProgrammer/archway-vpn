@@ -1,0 +1,1 @@
+{"gateway":"vpn.example.com","ike_port":500,"psk":"k","auth":{"Eap":{"identity":{"User":"jane@corp"},"secret":"pw"}},"local_id":null,"dh_groups":[21],"ike_proposals":["aes192-sha512"],"esp_proposals":["aes192-sha512"],"natt_keepalive":300,"ifname":"a","mtu":1500,"routes":"Gateway","block_ipv6":true,"set_dns":true,"verbose":false}

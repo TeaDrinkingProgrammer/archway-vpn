@@ -6,6 +6,8 @@ Archway is essentially a desktop frontend for [strongSwan](https://www.strongswa
 
 > [!WARNING]
 > Archway is in a very early stage. Expect bugs and rough edges. If something breaks, please open an issue with the log (turn on verbose logging in Settings first).
+>
+> Archway is a side project. Its main use is connecting to company networks. If you rely on a VPN to keep your traffic private or secure, please use another solution.
 
 ![Archway main window](docs/screenshot.png)
 
@@ -16,7 +18,7 @@ Archway is essentially a desktop frontend for [strongSwan](https://www.strongswa
 - **Username and password, too.** No SSO? Archway also supports classic username/password logins and pre-shared-key-only setups.
 - **Flexible routing.** Send only your company's networks through the VPN, route all traffic through it, or pick the networks yourself.
 - **Leak protection.** Archway uses the VPN's DNS so internal servers resolve by name, and in full-tunnel mode it blocks IPv6 so nothing bypasses the VPN.
-- **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. The defaults match FortiClient's too.
+- **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. Most defaults match FortiClient's too; certificate verification on the SSO port is on by default.
 - **Multiple connections.** Save as many VPN profiles as you need and switch between them in one click.
 - **Secure secret storage.** Your VPN key and password are stored securely in your system's password manager (KWallet, GNOME Keyring, KeePassXC), never in a plain file.
 - **Easy sharing.** Hand a working connection to a colleague as a single file.
@@ -95,7 +97,7 @@ as defined in the Apache-2.0 license, shall be dual licensed as above, without a
 | strongSwan | `charon-systemd` with the EAP plugins: Fedora `strongswan`, Debian/Ubuntu `charon-systemd strongswan-swanctl libstrongswan-standard-plugins libcharon-extra-plugins libcharon-extauth-plugins`, Arch `strongswan`. The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. |
 | Runtime tools | `pkexec` (polkit) with a desktop polkit agent, `xdg-open`; a `resolvconf` implementation for VPN DNS |
 | Keyring (optional) | a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) to remember the PSK and password; without one they're kept in memory until the app closes |
-| Build | Rust ≥ 1.85 (edition 2024), `cargo` |
+| Build | Rust ≥ 1.95, `cargo` |
 | Display | X11 or Wayland; OpenGL rendering via glow |
 
 EAP methods are MSCHAPv2, GTC and MD5; the FortiGate picks one. DNS goes to the system through `resolvconf` (systemd-resolved, openresolv or Debian resolvconf). Routing all DNS queries through the VPN in full-tunnel mode needs systemd-resolved.
@@ -106,6 +108,8 @@ EAP methods are MSCHAPv2, GTC and MD5; the FortiGate picks one. DNS goes to the 
 cargo build --release
 ./target/release/archway-vpn
 ```
+
+With rustup, cargo uses the Rust version pinned in `rust-toolchain.toml` and installs it if needed.
 
 The binary is self-contained. When you connect, it starts a second copy of itself as root (`pkexec archway-vpn --backend`).
 
@@ -195,10 +199,12 @@ The backend reports status events back to the GUI over stdout.
 - The PSK and a saved password are not in these files. They're in your desktop keyring through the freedesktop Secret Service, as items labelled `Archway VPN: <connection> (PSK)` / `(password)`. Without a Secret Service they're kept in memory until the app closes.
 - A password is stored only if *Save password* is ticked; otherwise it stays in memory until the app closes.
 - The SSO token is single-use and never written to disk.
+- The browser hands the SSO token to a listener on `127.0.0.1`. The FortiGate builds that callback URL, so it can't carry a secret of Archway's, and the listener can't fully prove the request is your login's. It refuses requests from other users' processes and requests a web page sends itself (scripts, forms, images, frames). A forged callback could still sign you in with someone else's account, so Archway shows which account you signed in with, and warns when it differs from the connection's previous login. The accounts are kept in `~/.local/state/archway-vpn/sso-users.json`.
 - TLS on the SSO port:
   - *Verify the server certificate* uses the system CA store.
   - If the FortiGate omits its intermediate certificate, the app fetches it from the certificate's AIA URL, as browsers do. Downloaded certificates are only used as untrusted intermediates.
-  - With verification off, any certificate is accepted (FortiClient's default).
+  - Verification is on by default. With it off, any certificate is accepted, as in FortiClient's default setup, and anyone on the network path can send you to a fake login page. The editor warns about this under the checkbox.
+- Dependencies, rustls among them, are compiled into the binary, so security fixes in them ship as a new Archway release. CI checks `Cargo.lock` against the RustSec advisory database on every change and weekly.
 - The pkexec prompt names the binary path. Run the app from a location that only you (or root) can write to.
 - The backend runs no shell and no external commands. It configures the kernel over netlink, hands DNS to the standard `resolvconf` (through strongSwan) and controls strongSwan over its VICI socket. Interface names, routes, gateway names and proposals are checked against strict formats before anything runs as root, so a shared profile or a gateway can't inject commands.
 - strongSwan runs as a private instance with its own config and control socket in `/run/archway-vpn` (root only), with a fixed plugin list.
@@ -211,5 +217,7 @@ The backend reports status events back to the GUI over stdout.
 cargo test                       # unit tests: value checks, VICI, charon config/messages, request building, app
 ./scripts/netns-test.sh          # kernel tests, each in a throwaway network namespace (no root needed)
 ```
+
+`fuzz/` has libFuzzer targets for every parser that reads input from outside the app; see `fuzz/README.md`.
 
 End to end: connect with the app (turn on verbose logging in Settings) and check the tunnel with `ip -br addr show archway0` and `ip route show proto 233`.

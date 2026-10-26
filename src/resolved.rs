@@ -22,8 +22,10 @@ pub fn route_all_queries(ifindex: u32) -> Result<(), String> {
     let conn = zbus::blocking::Connection::system().map_err(|e| format!("system D-Bus: {e}"))?;
     let m = ManagerProxyBlocking::new(&conn).map_err(|e| format!("systemd-resolved: {e}"))?;
     let i = ifindex as i32;
-    m.set_link_domains(i, &ROUTE_ALL).map_err(|e| format!("systemd-resolved SetLinkDomains: {e}"))?;
-    m.set_link_default_route(i, true).map_err(|e| format!("systemd-resolved SetLinkDefaultRoute: {e}"))
+    m.set_link_domains(i, &ROUTE_ALL)
+        .map_err(|e| format!("systemd-resolved SetLinkDomains: {e}"))?;
+    m.set_link_default_route(i, true)
+        .map_err(|e| format!("systemd-resolved SetLinkDefaultRoute: {e}"))
 }
 
 #[cfg(test)]

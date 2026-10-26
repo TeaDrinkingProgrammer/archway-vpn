@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+Content-Type: text/html
+Cache-Control: no-cache
+
+<html><script>window.location="https://login.example/saml2?SAMLRequest=abc%3D";</script></html>

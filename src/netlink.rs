@@ -3,11 +3,16 @@
 
 use crate::net::{IfName, Ipv4Net, Mtu};
 use futures_util::{
-    future::{select, Either},
-    pin_mut, TryStreamExt,
+    TryStreamExt,
+    future::{Either, select},
+    pin_mut,
 };
-use netlink_packet_route::link::{InfoData, InfoKind, InfoXfrm, LinkAttribute, LinkInfo, LinkMessage};
-use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol, RouteScope, RouteType};
+use netlink_packet_route::link::{
+    InfoData, InfoKind, InfoXfrm, LinkAttribute, LinkInfo, LinkMessage,
+};
+use netlink_packet_route::route::{
+    RouteAddress, RouteAttribute, RouteMessage, RouteProtocol, RouteScope, RouteType,
+};
 use netlink_sys::SmolSocket;
 use rtnetlink::{Handle, LinkUnspec, LinkXfrm, RouteMessageBuilder};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -25,7 +30,9 @@ pub struct IfIndex(NonZeroU32);
 
 impl IfIndex {
     fn from_kernel(i: u32) -> Result<Self, String> {
-        NonZeroU32::new(i).map(Self).ok_or_else(|| "the kernel reported interface index 0".to_string())
+        NonZeroU32::new(i)
+            .map(Self)
+            .ok_or_else(|| "the kernel reported interface index 0".to_string())
     }
     pub fn get(self) -> u32 {
         self.0.get()
@@ -34,7 +41,8 @@ impl IfIndex {
 
 /// Run `f` with a fresh netlink handle, driving the connection on this thread until `f` finishes.
 fn with_handle<T>(f: impl AsyncFnOnce(Handle) -> Result<T, rtnetlink::Error>) -> Result<T, String> {
-    let (conn, handle, _) = rtnetlink::new_connection_with_socket::<SmolSocket>().map_err(|e| format!("netlink: {e}"))?;
+    let (conn, handle, _) = rtnetlink::new_connection_with_socket::<SmolSocket>()
+        .map_err(|e| format!("netlink: {e}"))?;
     async_io::block_on(async {
         let op = f(handle);
         pin_mut!(conn, op);
@@ -62,7 +70,9 @@ fn is_ours(l: &LinkMessage) -> bool {
     l.attributes.iter().any(|a| match a {
         LinkAttribute::LinkInfo(info) => {
             info.contains(&LinkInfo::Kind(InfoKind::Xfrm))
-                && info.iter().any(|i| matches!(i, LinkInfo::Data(InfoData::Xfrm(d)) if d.contains(&InfoXfrm::IfId(IF_ID))))
+                && info
+                    .iter()
+                    .any(|i| matches!(i, LinkInfo::Data(InfoData::Xfrm(d)) if d.contains(&InfoXfrm::IfId(IF_ID))))
         }
         _ => false,
     })
@@ -70,18 +80,35 @@ fn is_ours(l: &LinkMessage) -> bool {
 
 /// Index of the interface `name`, or None if it doesn't exist.
 pub fn link_index(name: &IfName) -> Result<Option<IfIndex>, String> {
-    get_link(name)?.map(|l| IfIndex::from_kernel(l.header.index)).transpose()
+    get_link(name)?
+        .map(|l| IfIndex::from_kernel(l.header.index))
+        .transpose()
 }
 
 /// Create the xfrm interface `name` bound to `IF_ID`; returns its index.
 pub fn add_xfrm_link(name: &IfName) -> Result<IfIndex, String> {
-    with_handle(async |h| h.link().add(LinkXfrm::new(&name.to_string(), 0, IF_ID).build()).execute().await)?;
+    with_handle(async |h| {
+        h.link()
+            .add(LinkXfrm::new(&name.to_string(), 0, IF_ID).build())
+            .execute()
+            .await
+    })?;
     link_index(name)?.ok_or_else(|| format!("interface {name} vanished right after creating it"))
 }
 
 /// Set MTU and bring the interface up.
 pub fn link_up(index: IfIndex, mtu: Mtu) -> Result<(), String> {
-    with_handle(async |h| h.link().set(LinkUnspec::new_with_index(index.get()).mtu(u16::from(mtu).into()).up().build()).execute().await)
+    with_handle(async |h| {
+        h.link()
+            .set(
+                LinkUnspec::new_with_index(index.get())
+                    .mtu(u16::from(mtu).into())
+                    .up()
+                    .build(),
+            )
+            .execute()
+            .await
+    })
 }
 
 /// Delete interface `index` (also drops its addresses and routes, and resolved's per-link DNS).
@@ -91,16 +118,25 @@ pub fn del_link(index: IfIndex) -> Result<(), String> {
 
 /// Add `addr/32` to interface `index`.
 pub fn add_addr(index: IfIndex, addr: Ipv4Addr) -> Result<(), String> {
-    with_handle(async |h| h.address().add(index.get(), addr.into(), 32).execute().await)
+    with_handle(async |h| {
+        h.address()
+            .add(index.get(), addr.into(), 32)
+            .execute()
+            .await
+    })
 }
 
 fn v4_route(net: Ipv4Net) -> RouteMessageBuilder<Ipv4Addr> {
-    RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(net.addr(), net.prefix()).protocol(RouteProtocol::Other(RT_PROTO))
+    RouteMessageBuilder::<Ipv4Addr>::new()
+        .destination_prefix(net.addr(), net.prefix())
+        .protocol(RouteProtocol::Other(RT_PROTO))
 }
 
 /// Route `net` through interface `index`, with `src` as preferred source address.
 pub fn add_route(net: Ipv4Net, index: IfIndex, src: Option<Ipv4Addr>) -> Result<(), String> {
-    let mut b = v4_route(net).output_interface(index.get()).scope(RouteScope::Link);
+    let mut b = v4_route(net)
+        .output_interface(index.get())
+        .scope(RouteScope::Link);
     if let Some(s) = src {
         b = b.pref_source(s);
     }
@@ -110,7 +146,11 @@ pub fn add_route(net: Ipv4Net, index: IfIndex, src: Option<Ipv4Addr>) -> Result<
 /// Route `net` via `gateway` on interface `index` (the host route that keeps the VPN gateway reachable outside the
 /// tunnel in full-tunnel mode). An existing route to `net` (e.g. left by another VPN client) is fine: returns false
 /// and leaves it alone.
-pub fn add_route_via(net: Ipv4Net, gateway: Option<Ipv4Addr>, index: IfIndex) -> Result<bool, String> {
+pub fn add_route_via(
+    net: Ipv4Net,
+    gateway: Option<Ipv4Addr>,
+    index: IfIndex,
+) -> Result<bool, String> {
     let mut b = v4_route(net).output_interface(index.get());
     match gateway {
         Some(g) => b = b.gateway(g),
@@ -125,13 +165,21 @@ pub fn add_route_via(net: Ipv4Net, gateway: Option<Ipv4Addr>, index: IfIndex) ->
 
 /// Delete our route to `net` (any scope, like `ip route del`).
 pub fn del_route(net: Ipv4Net) -> Result<(), String> {
-    with_handle(async |h| h.route().del(v4_route(net).scope(RouteScope::NoWhere).build()).execute().await)
+    with_handle(async |h| {
+        h.route()
+            .del(v4_route(net).scope(RouteScope::NoWhere).build())
+            .execute()
+            .await
+    })
 }
 
 /// How the kernel currently reaches `dst`: (gateway, interface index). Used before going full tunnel.
 pub fn route_to(dst: Ipv4Addr) -> Result<(Option<Ipv4Addr>, IfIndex), String> {
-    let msg = RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(dst, 32).build();
-    let r = with_handle(async |h| h.route().get(msg).execute().try_next().await)?.ok_or_else(|| format!("no route to {dst}"))?;
+    let msg = RouteMessageBuilder::<Ipv4Addr>::new()
+        .destination_prefix(dst, 32)
+        .build();
+    let r = with_handle(async |h| h.route().get(msg).execute().try_next().await)?
+        .ok_or_else(|| format!("no route to {dst}"))?;
     let mut gw = None;
     let mut oif = None;
     for a in &r.attributes {
@@ -146,7 +194,10 @@ pub fn route_to(dst: Ipv4Addr) -> Result<(Option<Ipv4Addr>, IfIndex), String> {
 }
 
 /// The two halves of IPv6 the block makes unreachable: `::/1` and `8000::/1`.
-const V6_HALVES: [Ipv6Addr; 2] = [Ipv6Addr::UNSPECIFIED, Ipv6Addr::new(0x8000, 0, 0, 0, 0, 0, 0, 0)];
+const V6_HALVES: [Ipv6Addr; 2] = [
+    Ipv6Addr::UNSPECIFIED,
+    Ipv6Addr::new(0x8000, 0, 0, 0, 0, 0, 0, 0),
+];
 
 fn v6_unreachable(dst: Ipv6Addr) -> RouteMessage {
     RouteMessageBuilder::<Ipv6Addr>::new()
@@ -180,9 +231,17 @@ pub fn del_ipv6_block() -> Result<(), String> {
 fn our_routes() -> Result<Vec<RouteMessage>, String> {
     let mut out = Vec::new();
     for v6 in [false, true] {
-        let msg = if v6 { RouteMessageBuilder::<Ipv6Addr>::new().build() } else { RouteMessageBuilder::<Ipv4Addr>::new().build() };
-        let all: Vec<RouteMessage> = with_handle(async |h| h.route().get(msg).execute().try_collect().await)?;
-        out.extend(all.into_iter().filter(|r| r.header.protocol == RouteProtocol::Other(RT_PROTO)));
+        let msg = if v6 {
+            RouteMessageBuilder::<Ipv6Addr>::new().build()
+        } else {
+            RouteMessageBuilder::<Ipv4Addr>::new().build()
+        };
+        let all: Vec<RouteMessage> =
+            with_handle(async |h| h.route().get(msg).execute().try_collect().await)?;
+        out.extend(
+            all.into_iter()
+                .filter(|r| r.header.protocol == RouteProtocol::Other(RT_PROTO)),
+        );
     }
     Ok(out)
 }
@@ -212,19 +271,37 @@ pub fn purge(name: &IfName) -> Result<usize, String> {
 
 /// A route someone else added (no `RT_PROTO` tag), for the kernel tests.
 #[cfg(test)]
-pub fn add_foreign_route_for_tests(net: Ipv4Net, gateway: Ipv4Addr, index: IfIndex) -> Result<(), String> {
-    let msg = RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(net.addr(), net.prefix()).gateway(gateway).output_interface(index.get()).build();
+pub fn add_foreign_route_for_tests(
+    net: Ipv4Net,
+    gateway: Ipv4Addr,
+    index: IfIndex,
+) -> Result<(), String> {
+    let msg = RouteMessageBuilder::<Ipv4Addr>::new()
+        .destination_prefix(net.addr(), net.prefix())
+        .gateway(gateway)
+        .output_interface(index.get())
+        .build();
     with_handle(async |h| h.route().add(msg).execute().await)
 }
 
 /// A dummy "uplink" with an address, for the kernel tests.
 #[cfg(test)]
 pub fn add_dummy_for_tests(name: &IfName, addr: Ipv4Addr, prefix: u8) -> Result<(), String> {
-    with_handle(async |h| h.link().add(rtnetlink::LinkDummy::new(&name.to_string()).build()).execute().await)?;
+    with_handle(async |h| {
+        h.link()
+            .add(rtnetlink::LinkDummy::new(&name.to_string()).build())
+            .execute()
+            .await
+    })?;
     let i = link_index(name)?.ok_or("dummy interface missing")?;
     link_up(i, Mtu::try_from(1500).expect("in range"))?;
     // the kernel adds its own link route for the prefix
-    with_handle(async |h| h.address().add(i.get(), addr.into(), prefix).execute().await)
+    with_handle(async |h| {
+        h.address()
+            .add(i.get(), addr.into(), prefix)
+            .execute()
+            .await
+    })
 }
 
 #[cfg(test)]
@@ -244,7 +321,12 @@ mod tests {
         assert_eq!(link_index(&ifn()).unwrap(), Some(i));
         link_up(i, Mtu::try_from(1400).unwrap()).unwrap();
         add_addr(i, Ipv4Addr::new(10, 98, 0, 2)).unwrap();
-        add_route("10.10.0.0/16".parse().unwrap(), i, Some(Ipv4Addr::new(10, 98, 0, 2))).unwrap();
+        add_route(
+            "10.10.0.0/16".parse().unwrap(),
+            i,
+            Some(Ipv4Addr::new(10, 98, 0, 2)),
+        )
+        .unwrap();
         add_ipv6_block().unwrap();
         assert_eq!(our_routes().unwrap().len(), 3);
         del_route("10.10.0.0/16".parse().unwrap()).unwrap();
@@ -274,11 +356,20 @@ mod tests {
         let up: IfName = "archwayup0".parse().unwrap();
         add_dummy_for_tests(&up, Ipv4Addr::new(192, 0, 2, 10), 24).unwrap();
         let ui = link_index(&up).unwrap().unwrap();
-        add_route_via("0.0.0.0/0".parse().unwrap(), Some(Ipv4Addr::new(192, 0, 2, 1)), ui).unwrap();
+        add_route_via(
+            "0.0.0.0/0".parse().unwrap(),
+            Some(Ipv4Addr::new(192, 0, 2, 1)),
+            ui,
+        )
+        .unwrap();
         let (gw, oif) = route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap();
         assert_eq!((gw, oif), (Some(Ipv4Addr::new(192, 0, 2, 1)), ui));
         add_route_via("198.51.100.7/32".parse().unwrap(), gw, oif).unwrap();
-        assert_eq!(purge(&"archwaynone0".parse().unwrap()).unwrap(), 2, "our default + host route");
+        assert_eq!(
+            purge(&"archwaynone0".parse().unwrap()).unwrap(),
+            2,
+            "our default + host route"
+        );
         del_link(ui).unwrap();
     }
 }

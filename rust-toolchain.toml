@@ -1,0 +1,5 @@
+[toolchain]
+# keep in step with the rust image in .github/workflows/release.yml
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

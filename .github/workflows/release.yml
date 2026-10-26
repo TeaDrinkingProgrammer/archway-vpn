@@ -1,16 +1,16 @@
 name: release
 
+# Publishing a release in GitHub (Releases > Draft a new release, with a new tag such as v0.3.0) builds the packages
+# and adds them to that release.
 on:
-  push:
-    tags: ["v[0-9]*"]
+  release:
+    types: [published]
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
-  # keep in step with the rust image of the packages job
-  RUST_VERSION: "1.96.0"
 
 jobs:
   check:
@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # first, so a bad tag fails in seconds and not after the long build
       - name: Tag matches the Cargo.toml version
         run: |
@@ -26,11 +28,9 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match Cargo.toml (expected $want)" >&2
             exit 1
           fi
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # the version and components in rust-toolchain.toml
+      - name: Install Rust
+        run: rustup toolchain install
       - name: cargo clippy
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: cargo test
@@ -44,11 +44,13 @@ jobs:
     # Fedora, Arch. Not the ubuntu-24.04 runner: a binary needs at least the glibc it was built against, and 24.04's
     # 2.39 would leave Debian 12 out (newer runners drop Ubuntu 24.04 and Debian 13 too). No -dev packages needed: the
     # GUI libs are dlopen()ed at run time.
-    # Tag plus digest of the multi-arch index; keep the Rust version in step with RUST_VERSION above.
+    # Tag plus digest of the multi-arch index; keep the Rust version in step with rust-toolchain.toml.
     container: docker.io/library/rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          persist-credentials: false
+      # no rust-cache: a release builds from a clean slate, so a poisoned cache can't end up in the packages
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-deb@3.8.0,cargo-generate-rpm@0.21.0
@@ -73,13 +75,21 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write # attestation: sign with the workflow's OIDC identity
+      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
           path: dist
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+      # build provenance for the packages and SHA256SUMS: `gh attestation verify <file> -R <owner>/<repo>` proves a
+      # file was built by this workflow from the release tag
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          files: dist/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+          subject-path: dist/*
+      - name: Add the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*

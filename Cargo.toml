@@ -1,13 +1,18 @@
 [package]
 name = "archway-vpn"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-authors = ["Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
+# egui needs 1.95; checked by the msrv job in .github/workflows/ci.yml
+rust-version = "1.95"
+authors = ["Stijn van Houwelingen <teadrinkingprogrammer@proton.me>", "Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
 description = "Connect to FortiGate IPsec (IKEv2) VPNs with SAML single sign-on"
 license = "MIT OR Apache-2.0"
-# TODO: change to the Archway repo once it is renamed
-repository = "https://github.com/wilco375/fortisaml-gui"
-homepage = "https://github.com/wilco375/fortisaml-gui"
+repository = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
+homepage = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
+
+[features]
+# Builds src/lib.rs, which exposes the parsers to the fuzz targets in fuzz/ (see fuzz/README.md). The app never needs it.
+fuzzing = []
 
 [dependencies]
 async-io = "2.6.0"
@@ -21,7 +26,7 @@ netlink-packet-route = "0.33"
 netlink-sys = "0.9"
 opener = { version = "0.9.0", features = ["reveal"] }
 rtnetlink = { version = "0.23", default-features = false, features = ["smol_socket"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.4"
 secret-service = { version = "5.2", features = ["rt-async-io-crypto-rust"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -33,6 +38,10 @@ x509-parser = "0.18.1"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 zeroize = "1.9"
 
+[lints.clippy]
+# the backend runs as root: every unsafe block says why it is sound
+undocumented_unsafe_blocks = "warn"
+
 [profile.release]
 strip = true
 # a binary a third smaller (22.6 -> 14.5 MB) for a slower release build; the UI is no slower to draw at "s"
@@ -43,7 +52,7 @@ codegen-units = 1
 # Release packages: `cargo deb` and `cargo generate-rpm` (see .github/workflows/release.yml). Dependencies are listed by
 # hand: the GUI libs are dlopen()ed, so automatic detection would miss them.
 [package.metadata.deb]
-copyright = "2026 Wilco van Beijnum"
+copyright = "2026 Stijn van Houwelingen, Wilco van Beijnum"
 extended-description = """\
 Archway drives a private strongSwan charon instance and asks for root \
 through pkexec only while the tunnel is being set up."""
