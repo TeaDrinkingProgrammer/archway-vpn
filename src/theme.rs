@@ -189,7 +189,7 @@ pub fn install(ctx: &egui::Context) {
         Style,
         Done,
     }
-    let id = egui::Id::new("theme-install");
+    let id = egui::Id::unique("theme-install");
     let step = ctx.data(|d| d.get_temp::<Step>(id)).unwrap_or_default();
     match step {
         Step::Fonts => {
@@ -591,7 +591,7 @@ fn painted(
             );
             let (rect, r) =
                 ui.allocate_exact_size((galley.size() + 2.0 * padding).max(min), Sense::click());
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
             let (ink, fill, stroke) = look(r.hovered(), r.is_pointer_button_down_on());
             let p = ui.painter();
             let radius = CornerRadius::same(radius);
@@ -632,7 +632,7 @@ pub fn icon_button(ui: &mut Ui, icon: &str, label: &str, on: bool) -> egui::Resp
 /// rate costs ~10% of a core for nothing.
 pub fn spinner(ui: &mut Ui, size: f32, color: Color32) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    r.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ProgressIndicator));
+    r.widget_info(|| egui::WidgetInfo::new(egui::Role::ProgressIndicator));
     if ui.is_rect_visible(rect) {
         ui.request_repaint_after(std::time::Duration::from_millis(50));
         // the same arc as egui::Spinner
@@ -743,7 +743,7 @@ pub fn list_button(ui: &mut Ui, enabled: bool, icon: &str, text: &str) -> egui::
             Sense::hover()
         },
     );
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
     let p = ui.painter();
     if enabled && r.hovered() {
         p.rect_filled(rect, CornerRadius::same(8), t.hover);
@@ -951,9 +951,7 @@ pub fn fold_card(
                 open = !open;
                 ui.data_mut(|d| d.insert_persisted(id, open));
             }
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, title_text)
-            });
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title_text));
             ui.ctx()
                 .accesskit_node_builder(r.id, |n| n.set_expanded(open));
             let p = ui.painter();
@@ -1070,7 +1068,7 @@ pub fn pill(ui: &mut Ui, kind: PillKind, text: &str) -> egui::Response {
         ink,
     );
     let (rect, r) = ui.allocate_exact_size(vec2(galley.size().x + 20.0, 24.0), Sense::hover());
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(12), fill);
     p.galley(
@@ -1102,7 +1100,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str, help: Option<&str>) -> eg
             *on = !*on;
             r.mark_changed();
         }
-        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, *on, label));
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, *on, label));
         let switch = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.center().y - SWITCH.y / 2.0),
             SWITCH,
@@ -1245,7 +1243,7 @@ mod tests {
             rects.push(
                 copy_button(
                     ui,
-                    egui::Id::new("c"),
+                    egui::Id::unique("c"),
                     || "10.0.0.1".into(),
                     "Copy",
                     Some(96.0),

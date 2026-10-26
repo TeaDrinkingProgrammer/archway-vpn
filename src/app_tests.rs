@@ -678,7 +678,7 @@ fn text_glyphs_exist_in_the_app_fonts() {
             .drop_without_applying_deltas();
     }
     let has = |family: egui::FontFamily, c: char| {
-        ctx.fonts_mut(|f| f.fonts.font(&family).characters().contains_key(&c))
+        ctx.fonts_mut(|f| f.characters(&family).contains_key(&c))
     };
     let proportional = |c| has(egui::FontFamily::Proportional, c);
     assert!(!proportional('漢'), "the check must catch a missing glyph");
@@ -696,9 +696,7 @@ fn text_glyphs_exist_in_the_app_fonts() {
     // only lucide.ttf: a glyph missing there would be drawn by the fallback as ◻
     let lucide = |c: char| {
         ctx.fonts_mut(|f| {
-            f.fonts
-                .font(&icons)
-                .characters()
+            f.characters(&icons)
                 .get(&c)
                 .is_some_and(|fonts| fonts.iter().any(|f| f == "lucide"))
         })
