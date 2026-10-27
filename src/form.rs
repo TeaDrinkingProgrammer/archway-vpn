@@ -257,6 +257,89 @@ pub fn field_id(key: &DraftKey) -> egui::Id {
     egui::Id::unique(("form-field", key))
 }
 
+/// Runs `add`, which adds the text field `id`. A right-click inside the field's selection keeps the selection, as in
+/// other apps, so the menu acts on it; a right-click elsewhere moves the cursor there (egui moves it on any button).
+pub fn keep_selection_on_right_click(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> egui::Response {
+    let ctx = ui.ctx().clone();
+    let pos = ctx.input(|i| {
+        let p = &i.pointer;
+        (p.secondary_pressed() || p.secondary_down() || p.secondary_released())
+            .then(|| p.interact_pos())
+            .flatten()
+    });
+    let on_field = pos.is_some_and(|pos| {
+        ctx.read_response(id)
+            .is_some_and(|r| r.interact_rect.contains(pos))
+    });
+    let before = on_field
+        .then(|| egui::TextEdit::load_state(&ctx, id))
+        .flatten()
+        .filter(|s| s.cursor.char_range().is_some_and(|c| !c.is_empty()));
+    let r = add(ui);
+    if let Some(before) = before {
+        let clicked = egui::TextEdit::load_state(&ctx, id)
+            .and_then(|s| s.cursor.char_range())
+            .map(|c| c.primary.index);
+        let selected = before.cursor.char_range().map(|c| c.as_sorted_char_range());
+        if let (Some(at), Some(sel)) = (clicked, selected)
+            && sel.start <= at
+            && at <= sel.end
+        {
+            before.store(&ctx, id);
+        }
+    }
+    r
+}
+
+/// The right-click menu of text field `r` showing `text`: Cut, Copy, Paste and Select All, or for a password only
+/// Paste and Select All. The field does the editing: an item gives it back its focus and the selection the menu was
+/// opened on, then asks the window for the same event as Ctrl+X/C/V. egui 0.37 drops the selection when another widget
+/// is clicked: https://github.com/emilk/egui/issues/8763
+pub fn edit_menu(r: &egui::Response, text: &str, password: bool) {
+    let ctx = r.ctx.clone();
+    let id = r.id;
+    let opened_on = id.with("menu-selection");
+    // typing while the menu is open changes the selection, and the undo history
+    if r.secondary_clicked() || r.changed() {
+        let s = egui::TextEdit::load_state(&ctx, id).unwrap_or_default();
+        ctx.data_mut(|d| d.insert_temp(opened_on, s));
+    }
+    r.context_menu(|ui| {
+        let state: egui::text_edit::TextEditState =
+            ctx.data(|d| d.get_temp(opened_on)).unwrap_or_default();
+        let selected = state.cursor.char_range().is_some_and(|c| !c.is_empty());
+        let mut command = None;
+        let mut item = |ui: &mut egui::Ui, label: &str, enabled: bool, c| {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                command = Some(c);
+            }
+        };
+        if !password {
+            item(ui, "Cut", selected, egui::ViewportCommand::RequestCut);
+            item(ui, "Copy", selected, egui::ViewportCommand::RequestCopy);
+        }
+        item(ui, "Paste", true, egui::ViewportCommand::RequestPaste);
+        let select_all = ui.button("Select All").clicked();
+        if command.is_some() || select_all {
+            let mut s = state;
+            if select_all {
+                s.cursor
+                    .set_char_range(Some(egui::text::CCursorRange::select_all_str(text)));
+            }
+            s.store(&ctx, id);
+            ctx.memory_mut(|m| m.request_focus(id));
+            if let Some(c) = command {
+                ctx.send_viewport_cmd(c);
+            }
+            ui.close();
+        }
+    });
+}
+
 /// A text field for `value`: shows the draft for `key` if there is one, else `show(value)`. Edits go through `parse`;
 /// while the text doesn't parse the field has a warning outline (the message is the caller's to show).
 pub fn text_field<V>(
@@ -299,7 +382,9 @@ pub fn text_field<V>(
             .font(font)
             .text_color(color);
     }
-    let r = crate::theme::labelled(ui.add(edit), key.1.label());
+    let r = keep_selection_on_right_click(ui, field_id(&key), |ui| ui.add(edit));
+    edit_menu(&r, &text, false);
+    let r = crate::theme::labelled(r, key.1.label());
     if look.inline.is_some() {
         // a line under it says it can be edited: dashed on hover, solid while editing
         let y = r.rect.bottom() + 1.0;
@@ -581,5 +666,229 @@ mod tests {
                 .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput
                     && n.label() == Some("IKE UDP Port"))
         );
+    }
+
+    // ---- the right-click menu ----
+
+    /// A text field (a password field if `password`) in a test window, driven one frame at a time.
+    struct Menu {
+        ctx: egui::Context,
+        text: String,
+        password: bool,
+        nodes: Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>,
+        commands: Vec<egui::ViewportCommand>,
+        copied: Vec<String>,
+    }
+
+    const ID: &str = "menu-test-field";
+
+    impl Menu {
+        fn new(text: &str, password: bool) -> Self {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            for _ in 0..2 {
+                ctx.run_ui(Default::default(), |ui| crate::theme::install(ui.ctx()))
+                    .drop_without_applying_deltas();
+            }
+            let mut m = Menu {
+                ctx,
+                text: text.into(),
+                password,
+                nodes: vec![],
+                commands: vec![],
+                copied: vec![],
+            };
+            m.run(vec![]);
+            m
+        }
+
+        fn id() -> egui::Id {
+            egui::Id::unique(ID)
+        }
+
+        fn run(&mut self, events: Vec<egui::Event>) {
+            let (text, password) = (&mut self.text, self.password);
+            let mut out = self.ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    keep_selection_on_right_click(ui, Self::id(), |ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(text)
+                                .id(Self::id())
+                                .password(password),
+                        );
+                        edit_menu(&r, text.as_str(), password);
+                        r
+                    });
+                },
+            );
+            self.nodes = out
+                .platform_output
+                .accesskit_update
+                .take()
+                .map(|u| u.nodes)
+                .unwrap_or_default();
+            self.commands = out
+                .viewport_output
+                .values()
+                .flat_map(|v| v.commands.clone())
+                .collect();
+            self.copied = out
+                .platform_output
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    egui::OutputCommand::CopyText(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .collect();
+            out.drop_without_applying_deltas();
+        }
+
+        fn select(&mut self, from: usize, to: usize) {
+            let mut s = egui::TextEdit::load_state(&self.ctx, Self::id()).unwrap_or_default();
+            s.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(from),
+                egui::text::CCursor::new(to),
+            )));
+            s.store(&self.ctx, Self::id());
+            self.ctx.memory_mut(|m| m.request_focus(Self::id()));
+            self.run(vec![]);
+        }
+
+        fn selection(&self) -> Option<std::ops::Range<usize>> {
+            egui::TextEdit::load_state(&self.ctx, Self::id())
+                .and_then(|s| s.cursor.char_range())
+                .map(|r| {
+                    let [a, b] = r.sorted_cursors();
+                    a.index.0..b.index.0
+                })
+        }
+
+        fn right_click(&mut self) {
+            let pos = self.ctx.read_response(Self::id()).unwrap().rect.center();
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            self.run(vec![egui::Event::PointerMoved(pos), button(true)]);
+            self.run(vec![button(false)]);
+            self.run(vec![]);
+        }
+
+        fn item(&self, label: &str) -> Option<&egui::accesskit::Node> {
+            self.nodes
+                .iter()
+                .map(|(_, n)| n)
+                .find(|n| n.label() == Some(label))
+        }
+
+        /// Click menu item `label` with the mouse, as only that drops the selection:
+        /// https://github.com/emilk/egui/issues/8763
+        fn click(&mut self, label: &str) {
+            let b = self.item(label).and_then(|n| n.bounds()).expect(label);
+            let pos = egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            self.run(vec![egui::Event::PointerMoved(pos), button(true)]);
+            self.run(vec![button(false)]);
+        }
+
+        fn focused(&self) -> bool {
+            self.ctx.memory(|m| m.has_focus(Self::id()))
+        }
+    }
+
+    #[test]
+    fn right_click_keeps_the_selection_and_offers_cut_copy_paste() {
+        let mut m = Menu::new("vpn.example.com", false);
+        // the click lands past the end of the text, inside the selection
+        m.select(4, 15);
+        m.right_click();
+        assert_eq!(
+            m.selection(),
+            Some(4..15),
+            "the right-click didn't move the cursor"
+        );
+        for item in ["Cut", "Copy", "Paste", "Select All"] {
+            assert!(m.item(item).is_some_and(|n| !n.is_disabled()), "{item}");
+        }
+        m.click("Copy");
+        assert!(m.commands.contains(&egui::ViewportCommand::RequestCopy));
+        assert!(m.focused(), "the field has the focus back for the copy");
+        assert_eq!(m.selection(), Some(4..15));
+        // what the window sends back for RequestCopy
+        m.run(vec![egui::Event::Copy]);
+        assert_eq!(m.copied, ["example.com"]);
+        assert!(m.item("Cut").is_none(), "the menu closed");
+    }
+
+    #[test]
+    fn right_click_outside_the_selection_moves_the_cursor() {
+        let mut m = Menu::new("vpn.example.com", false);
+        m.select(4, 11);
+        m.right_click();
+        assert_eq!(m.selection(), Some(15..15));
+        assert!(m.item("Copy").unwrap().is_disabled());
+    }
+
+    #[test]
+    fn cut_and_paste_go_to_the_field() {
+        let mut m = Menu::new("abc", false);
+        m.select(0, 3);
+        m.right_click();
+        m.click("Cut");
+        assert!(m.commands.contains(&egui::ViewportCommand::RequestCut));
+        // what the window sends back for RequestCut
+        m.run(vec![egui::Event::Cut]);
+        assert_eq!(m.text, "");
+        m.right_click();
+        m.click("Paste");
+        assert!(m.commands.contains(&egui::ViewportCommand::RequestPaste));
+        m.run(vec![egui::Event::Paste("xyz".into())]);
+        assert_eq!(m.text, "xyz");
+    }
+
+    #[test]
+    fn without_a_selection_only_paste_and_select_all_work() {
+        let mut m = Menu::new("abc", false);
+        m.right_click();
+        assert!(m.item("Cut").unwrap().is_disabled());
+        assert!(m.item("Copy").unwrap().is_disabled());
+        assert!(!m.item("Paste").unwrap().is_disabled());
+        m.click("Select All");
+        assert_eq!(m.selection(), Some(0..3));
+        assert!(m.focused());
+    }
+
+    #[test]
+    fn typing_while_the_menu_is_open_updates_what_it_acts_on() {
+        let mut m = Menu::new("abcdef", false);
+        m.select(3, 6);
+        m.right_click();
+        // the menu doesn't take the keyboard: this replaces the selection
+        m.run(vec![egui::Event::Text("X".into())]);
+        assert_eq!(m.text, "abcX");
+        assert!(m.item("Cut").unwrap().is_disabled());
+        m.click("Paste");
+        assert_eq!(m.selection(), Some(4..4));
+    }
+
+    #[test]
+    fn a_password_cannot_be_cut_or_copied() {
+        let mut m = Menu::new("hunter2", true);
+        m.select(0, 7);
+        m.right_click();
+        assert!(m.item("Cut").is_none() && m.item("Copy").is_none());
+        assert!(m.item("Paste").is_some() && m.item("Select All").is_some());
     }
 }

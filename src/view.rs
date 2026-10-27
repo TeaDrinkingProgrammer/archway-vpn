@@ -1458,7 +1458,9 @@ fn secret(
         .password(true)
         .margin(Margin::symmetric(10, 10))
         .desired_width(width);
-    theme::labelled(ui.add(edit), label)
+    let r = form::keep_selection_on_right_click(ui, id, |ui| ui.add(edit));
+    form::edit_menu(&r, value, true);
+    theme::labelled(r, label)
 }
 
 /// The DH groups this client supports as checkboxes, kept sorted, after a few it doesn't (disabled).
