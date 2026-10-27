@@ -1132,6 +1132,58 @@ fn type_slowly(
     nodes
 }
 
+/// The middle of what `n` covers on screen.
+fn centre(n: &egui::accesskit::Node) -> egui::Pos2 {
+    let b = n.bounds().unwrap();
+    egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+}
+
+#[test]
+fn a_field_can_be_copied_from_its_right_click_menu() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    frame_focus(&ctx, &mut app, vec![]);
+    let nodes = type_slowly(&ctx, &mut app, Field::Gateway, "vpn.example.com");
+    let pos = centre(&field_node(&nodes, Field::Gateway).1);
+    let select_all = egui::Event::Key {
+        key: egui::Key::A,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::COMMAND,
+    };
+    let press = |pos, button, pressed| egui::Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let right = egui::PointerButton::Secondary;
+    app_frame(&ctx, &mut app, vec![select_all]);
+    app_frame(
+        &ctx,
+        &mut app,
+        vec![egui::Event::PointerMoved(pos), press(pos, right, true)],
+    );
+    app_frame(&ctx, &mut app, vec![press(pos, right, false)]);
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    assert!(button(&nodes, "Cut").is_some() && button(&nodes, "Paste").is_some());
+    // a mouse click, not an AccessKit one: only that drops the selection, https://github.com/emilk/egui/issues/8763
+    let pos = centre(button(&nodes, "Copy").unwrap());
+    let left = egui::PointerButton::Primary;
+    app_frame(
+        &ctx,
+        &mut app,
+        vec![egui::Event::PointerMoved(pos), press(pos, left, true)],
+    );
+    app_frame(&ctx, &mut app, vec![press(pos, left, false)]);
+    // the window answers RequestCopy with a Copy event
+    let (_, copied) = app_frame(&ctx, &mut app, vec![egui::Event::Copy]);
+    assert_eq!(copied, ["vpn.example.com"]);
+}
+
 #[test]
 fn typing_an_invalid_gateway_keeps_focus_and_the_label_above_the_field() {
     let _t = TempConfig::new();
