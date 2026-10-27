@@ -785,7 +785,15 @@ mod tests {
             "a VPN session is already running; disconnect it first"
         );
         drop(first);
-        assert!(lock_at(&path).is_ok(), "free again once the holder is gone");
+        // a process another test is starting has a copy of our descriptor, and so the lock, until it execs
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut again = lock_at(&path);
+        while again.is_err() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            again = lock_at(&path);
+        }
+        assert!(again.is_ok(), "free again once the holder is gone");
         let _ = std::fs::remove_file(path);
     }
 
