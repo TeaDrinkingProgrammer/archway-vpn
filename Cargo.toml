@@ -16,7 +16,7 @@ fuzzing = []
 
 [dependencies]
 async-io = "2.6.0"
-eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "glow", "links", "wayland", "x11"] }
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "glow", "links", "wayland", "x11"] }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
 futures-util = "0.3.34"
 getrandom = "0.4"
