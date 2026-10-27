@@ -1,0 +1,20 @@
+# Advisories that OSV-Scanner (and the OpenSSF Scorecard Vulnerabilities check) should skip.
+# Each entry needs a reason; revisit when ignoreUntil passes.
+
+# zvariant, zvariant_derive and zbus_names were merged into zbus 6. Every zbus user in the tree
+# (secret-service, opener, accesskit_unix and Archway itself) is still on zbus 5, so the old crates stay
+# until those move. Unmaintained, no known vulnerability.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2027-04-27
+reason = "zvariant unmaintained (merged into zbus 6); pulled in through zbus 5 by secret-service, opener and accesskit_unix"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2027-04-27
+reason = "zbus_names unmaintained (merged into zbus 6); pulled in through zbus 5 by secret-service, opener and accesskit_unix"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2027-04-27
+reason = "zvariant_derive unmaintained (merged into zbus 6); pulled in through zbus 5 by secret-service, opener and accesskit_unix"
