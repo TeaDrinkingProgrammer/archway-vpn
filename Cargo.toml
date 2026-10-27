@@ -1,6 +1,6 @@
 [package]
 name = "archway-vpn"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 # egui needs 1.95; checked by the msrv job in .github/workflows/ci.yml
 rust-version = "1.95"
