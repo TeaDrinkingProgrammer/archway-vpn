@@ -52,7 +52,7 @@ pub fn install_hint() -> String {
         "error",
         "strongSwan isn't installed",
         "it sets up the IPsec connection",
-        "install it: Fedora `sudo dnf install strongswan`, Debian/Ubuntu `sudo apt install charon-systemd strongswan-swanctl \
+        "install the archway-vpn-ipsec package, or strongSwan itself: Fedora `sudo dnf install strongswan`, Debian/Ubuntu `sudo apt install charon-systemd strongswan-swanctl \
          libstrongswan-standard-plugins libcharon-extra-plugins libcharon-extauth-plugins`, Arch `sudo pacman -S strongswan`",
     )
 }
