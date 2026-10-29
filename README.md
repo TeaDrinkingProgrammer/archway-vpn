@@ -120,7 +120,7 @@ as defined in the Apache-2.0 license, shall be dual licensed as above, without a
 | | |
 |---|---|
 | OS | Linux with XFRM interface support (kernel ≥ 4.19) |
-| FortiGate connections | strongSwan: `charon-systemd` with the EAP plugins (packages in [Install](#install)). The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. Also `pkexec` (polkit) with a desktop polkit agent, and a `resolvconf` implementation for VPN DNS. |
+| FortiGate connections | strongSwan: `charon-systemd` with the EAP plugins (packages in [Install](#install)). The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. Also systemd, `ip` (iproute2), `pkexec` (polkit) with a desktop polkit agent, and a `resolvconf` implementation for VPN DNS. |
 | Azure VPN connections | OpenVPN 3 Linux (`openvpn3-client`, see [Install](#install)) |
 | Runtime tools | `xdg-open`, and `xdg-desktop-portal` for the file dialog |
 | Keyring (optional) | a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) to remember the PSK and password; without one they're kept in memory until the app closes |
@@ -222,7 +222,7 @@ The backend reports status events back to the GUI over stdout.
 - The backend is root only while it sets up the tunnel. Then it switches to your user and keeps two capabilities: network admin, to tear the tunnel down again, and kill, to stop its strongSwan instance.
 - strongSwan's charon handles IKE, rekeying and the kernel IPsec SAs. It runs as a private instance with its own config and control socket, and stops when the backend exits.
 - Secrets (PSK, SSO token, password) reach the backend over a pipe and charon over its control socket. They never appear on a command line or in a file. The stdin pipe then acts as the control channel: a `disconnect` line, or EOF when the GUI exits or crashes, makes the backend clean up and exit.
-- If the backend is killed outright, its interface and routes stay until the next Connect (or a reboot), which removes them.
+- If the backend dies without cleaning up (a crash, a kill), systemd does it: the backend runs in the transient scope `archway-vpn.scope`, and when that scope ends, the guard service `archway-vpn-cleanup.service` removes the interface, the routes and the IPv6 block with `ip`.
 
 #### Azure VPN
 
@@ -284,6 +284,7 @@ The GUI polls the session's status over D-Bus. OpenVPN 3's services do the privi
 | `src/net.rs` | checked value types (interface names, networks, DNS names, proposals, secrets) |
 | `src/netlink.rs` | kernel interface / address / route setup over netlink |
 | `src/resolved.rs` | full tunnel: route all DNS queries to the VPN (systemd-resolved, D-Bus) |
+| `src/systemd.rs` | cleanup by systemd if the backend dies |
 | `src/privdrop.rs` | switch to the user with only CAP_NET_ADMIN and CAP_KILL |
 | `src/tunnel.rs` | tunnel plumbing and teardown |
 | `src/saml.rs` | FortiGate SAML flow and local callback server |

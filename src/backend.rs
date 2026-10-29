@@ -462,10 +462,13 @@ fn run_privileged(r: &BackendRequest) -> Result<(), String> {
     if charon::kill_stale() > 0 {
         blog("stopped a charon left behind by a previous run".into());
     }
-    let n = netlink::purge(&r.ifname)?;
+    let n = netlink::purge()?;
     if n > 0 {
         blog(format!("purged {n} stale item(s) from a previous run"));
     }
+    netlink::ensure_free(&r.ifname)?;
+    // before charon starts, so it runs in the scope too
+    crate::systemd::guard(&r.ifname)?;
     let dns_name = r
         .set_dns
         .then(|| charon::resolvconf_name(&r.ifname, charon::resolvconf_target().as_deref()));

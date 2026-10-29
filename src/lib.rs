@@ -17,6 +17,7 @@ pub mod privdrop;
 pub mod protocol;
 pub mod resolved;
 pub mod saml;
+pub mod systemd;
 pub mod tls;
 pub mod tunnel;
 pub mod vici;

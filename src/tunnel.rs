@@ -155,11 +155,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert_eq!(
-            netlink::purge(&"archwaytest0".parse().unwrap()).unwrap(),
-            0,
-            "nothing left behind"
-        );
+        assert_eq!(netlink::purge().unwrap(), 0, "nothing left behind");
     }
 
     #[test]
