@@ -60,17 +60,13 @@ codegen-units = 1
 [package.metadata.deb]
 copyright = "2026 Stijn van Houwelingen, Wilco van Beijnum"
 extended-description = """\
-Archway drives a private strongSwan charon instance and asks for root \
-through pkexec only while the tunnel is being set up."""
+FortiGate connections run on a private strongSwan charon instance and ask \
+for root through pkexec only while the tunnel is being set up. Azure VPN \
+connections run on OpenVPN 3 Linux. Install archway-vpn-ipsec or \
+archway-vpn-openvpn for the engine your connections need."""
 section = "net"
 priority = "optional"
 depends = [
-    # charon-systemd is the binary the app starts; the plugin packages hold openssl, eap-mschapv2, eap-gtc, eap-md5
-    "charon-systemd",
-    "libstrongswan-standard-plugins",
-    "libcharon-extra-plugins",
-    "libcharon-extauth-plugins",
-    "pkexec",
     # dlopen()ed by winit/glutin/zbus
     "libegl1",
     "libgl1",
@@ -93,6 +89,9 @@ depends = [
 ]
 # no Secret Service provider listed: Debian/Ubuntu have no virtual package for it
 recommends = ["libgl1-mesa-dri", "libegl-mesa0"]
+# one package per VPN engine (the variants below), named after the engine, not a vendor, so connection types that share an
+# engine share it; a user installs only the one their connections need
+suggests = ["archway-vpn-ipsec", "archway-vpn-openvpn"]
 # target/release is cargo-deb's placeholder for the real target dir; keep it as written
 assets = [
     ["target/release/archway-vpn", "usr/bin/", "755"],
@@ -105,6 +104,38 @@ assets = [
     ["assets/fonts/Lucide-LICENSE.txt", "usr/share/doc/archway-vpn/", "644"],
     ["assets/fonts/NotoEmoji-OFL.txt", "usr/share/doc/archway-vpn/", "644"],
 ]
+
+# The VPN engines, one package each (`cargo deb --variant <name>`): only dependencies, plus the licence so the package
+# isn't empty. A variant's settings replace the base ones, not add to them.
+[package.metadata.deb.variants.ipsec]
+name = "archway-vpn-ipsec"
+extended-description = """\
+Installs strongSwan and pkexec, the IPsec (IKEv2) engine Archway's \
+FortiGate connections run on."""
+# charon-systemd is the binary the app starts; the plugin packages hold openssl, eap-mschapv2, eap-gtc, eap-md5;
+# pkexec gives the backend root
+depends = [
+    "archway-vpn",
+    "charon-systemd",
+    "libstrongswan-standard-plugins",
+    "libcharon-extra-plugins",
+    "libcharon-extauth-plugins",
+    "pkexec",
+]
+recommends = []
+suggests = []
+assets = [["LICENSE-MIT", "usr/share/doc/archway-vpn-ipsec/", "644"]]
+
+[package.metadata.deb.variants.openvpn]
+name = "archway-vpn-openvpn"
+extended-description = """\
+Installs OpenVPN 3 Linux, the OpenVPN engine Archway's Azure VPN \
+connections run on. Most releases need OpenVPN's package repository \
+for it."""
+depends = ["archway-vpn", "openvpn3-client"]
+recommends = []
+suggests = []
+assets = [["LICENSE-MIT", "usr/share/doc/archway-vpn-openvpn/", "644"]]
 
 [package.metadata.generate-rpm]
 # requires below are complete; rpm's own detection only sees linked libs
@@ -122,8 +153,6 @@ assets = [
 ]
 
 [package.metadata.generate-rpm.requires]
-strongswan = "*"
-polkit = "*"
 # dlopen()ed by winit/glutin/zbus
 libwayland-client = "*"
 libwayland-egl = "*"
@@ -146,3 +175,31 @@ libgcc = "*"
 # no Secret Service provider listed: Fedora has no generic provide for it
 [package.metadata.generate-rpm.recommends]
 mesa-dri-drivers = "*"
+
+# one package per VPN engine (the variants below), named after the engine, not a vendor, so connection types that share an
+# engine share it; a user installs only the one their connections need
+[package.metadata.generate-rpm.suggests]
+archway-vpn-ipsec = "*"
+archway-vpn-openvpn = "*"
+
+# The VPN engines, one package each (`cargo generate-rpm --variant <name>`): only dependencies, plus the licence so the
+# package isn't empty. A variant's tables replace the base ones, not add to them.
+[package.metadata.generate-rpm.variants.ipsec]
+name = "archway-vpn-ipsec"
+summary = "IPsec engine for Archway's FortiGate connections: strongSwan and polkit"
+assets = [
+    { source = "LICENSE-MIT", dest = "/usr/share/licenses/archway-vpn-ipsec/LICENSE-MIT", mode = "644", doc = true },
+]
+requires = { archway-vpn = "*", strongswan = "*", polkit = "*" }
+recommends = {}
+suggests = {}
+
+[package.metadata.generate-rpm.variants.openvpn]
+name = "archway-vpn-openvpn"
+summary = "OpenVPN engine for Archway's Azure VPN connections: OpenVPN 3 Linux (from the dsommers/openvpn3 Copr)"
+assets = [
+    { source = "LICENSE-MIT", dest = "/usr/share/licenses/archway-vpn-openvpn/LICENSE-MIT", mode = "644", doc = true },
+]
+requires = { archway-vpn = "*", openvpn3-client = "*" }
+recommends = {}
+suggests = {}
