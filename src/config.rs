@@ -50,9 +50,9 @@ pub enum RouteMode {
     Custom,
 }
 
-/// A connection: `profiles/<name>.toml` holds everything except id, name and secrets, in the same sections.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+/// A connection: `profiles/<name>.toml` holds everything except id, name and secrets, in the same sections. Read by
+/// `parse_profile`.
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Profile {
     /// stable key for this profile's keyring items (see keyring.rs); stored in state.json, not in the profile file
     #[serde(skip)]
@@ -61,14 +61,116 @@ pub struct Profile {
     #[serde(skip)]
     pub name: ProfileName,
     pub description: Description,
+    /// the FortiGate's pre-shared key, or the Azure gateway's server secret (the OpenVPN tls-auth key); stored in the
+    /// Secret Service, never in the profile file (see keyring.rs)
+    #[serde(skip)]
+    pub psk: String,
+    /// the connection's type and its settings
+    #[serde(flatten)]
+    pub vpn: Vpn,
+}
+
+/// What a connection connects to, and over what. Each type brings its own settings, editor and connect path; the
+/// sign-in method is a setting within the type.
+/// In `Kind::ALL` order: the New Connection dialog indexes by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// FortiGate, IPsec IKEv2 on strongSwan (backend.rs)
+    FortiGateIkev2,
+    /// Azure VPN Gateway, OpenVPN on OpenVPN 3 Linux, Microsoft Entra ID sign-in (azure.rs)
+    AzureOpenvpn,
+}
+
+impl Kind {
+    /// In the order the New Connection dialog lists them.
+    pub const ALL: [Kind; 2] = [Kind::FortiGateIkev2, Kind::AzureOpenvpn];
+
+    /// The `type` key in a profile file.
+    fn id(self) -> &'static str {
+        match self {
+            Kind::FortiGateIkev2 => "fortigate-ikev2",
+            Kind::AzureOpenvpn => "azure-openvpn",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::FortiGateIkev2 => "FortiGate",
+            Kind::AzureOpenvpn => "Azure VPN",
+        }
+    }
+
+    /// The protocol and how you sign in, under the name in the New Connection dialog.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Kind::FortiGateIkev2 => "IPsec IKEv2 · SSO, password or PSK",
+            Kind::AzureOpenvpn => "OpenVPN · Microsoft Entra ID",
+        }
+    }
+
+    /// Why this type can't connect on this system (its VPN engine isn't installed, as a diag with the install
+    /// command), or None.
+    pub fn missing_engine(self) -> Option<String> {
+        match self {
+            Kind::FortiGateIkev2 => crate::charon::charon_binary()
+                .is_none()
+                .then(crate::charon::install_hint),
+            Kind::AzureOpenvpn => crate::openvpn3::OpenVpn3::connect().err(),
+        }
+    }
+}
+
+/// A connection's type-specific settings (see `Kind`). In a profile file a `type` key names the type; FortiGate
+/// files, written before there were other types, have none (see `parse_profile`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Vpn {
+    FortiGate(FortiGate),
+    Azure(crate::azure::Azure),
+}
+
+impl Vpn {
+    pub fn kind(&self) -> Kind {
+        match self {
+            Vpn::FortiGate(_) => Kind::FortiGateIkev2,
+            Vpn::Azure(_) => Kind::AzureOpenvpn,
+        }
+    }
+}
+
+impl Default for Vpn {
+    fn default() -> Self {
+        Vpn::FortiGate(FortiGate::default())
+    }
+}
+
+impl Serialize for Vpn {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Typed<'a, T> {
+            r#type: &'static str,
+            #[serde(flatten)]
+            settings: &'a T,
+        }
+        match self {
+            Vpn::FortiGate(f) => f.serialize(s),
+            Vpn::Azure(a) => Typed {
+                r#type: Kind::AzureOpenvpn.id(),
+                settings: a,
+            }
+            .serialize(s),
+        }
+    }
+}
+
+/// A FortiGate connection's settings (`Kind::FortiGateIkev2`), in FortiClient's sections.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct FortiGate {
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "empty_as_none"
     )]
     pub gateway: Option<Host>,
-    /// stored in the Secret Service, never in the profile file (see keyring.rs)
-    #[serde(skip)]
-    pub psk: String,
     /// Single Sign On
     pub sso: Sso,
     /// user authentication when SSO is off
@@ -186,18 +288,7 @@ fn default_proposals() -> Vec<Proposal> {
 
 impl Default for Profile {
     fn default() -> Self {
-        Self {
-            id: new_uid(),
-            name: ProfileName::default(),
-            description: Description::default(),
-            gateway: None,
-            psk: String::new(),
-            sso: Sso::default(),
-            auth: Auth::default(),
-            ike: Ike::default(),
-            esp: Esp::default(),
-            network: Network::default(),
-        }
+        Self::new(Vpn::default())
     }
 }
 
@@ -258,6 +349,55 @@ impl Default for Network {
 }
 
 impl Profile {
+    /// A new connection with these settings, under the default name.
+    pub fn new(vpn: Vpn) -> Self {
+        Self {
+            id: new_uid(),
+            name: ProfileName::default(),
+            description: Description::default(),
+            psk: String::new(),
+            vpn,
+        }
+    }
+
+    /// The FortiGate settings, if it's a FortiGate connection.
+    pub fn fortigate(&self) -> Option<&FortiGate> {
+        match &self.vpn {
+            Vpn::FortiGate(f) => Some(f),
+            Vpn::Azure(_) => None,
+        }
+    }
+
+    /// Tests set FortiGate settings a lot; panics on another type.
+    #[cfg(test)]
+    pub fn fg(&mut self) -> &mut FortiGate {
+        match &mut self.vpn {
+            Vpn::FortiGate(f) => f,
+            Vpn::Azure(_) => panic!("not a FortiGate connection"),
+        }
+    }
+
+    /// The gateway for messages and the connection list, empty if it has none yet.
+    pub fn gateway_text(&self) -> String {
+        match &self.vpn {
+            Vpn::FortiGate(f) => f
+                .gateway
+                .as_ref()
+                .map_or_else(String::new, ToString::to_string),
+            Vpn::Azure(a) => a.gateway.to_string(),
+        }
+    }
+
+    /// How it signs in, for the status card.
+    pub fn sign_in(&self) -> &'static str {
+        match &self.vpn {
+            Vpn::FortiGate(f) if f.sso.enabled => "SSO",
+            Vpn::FortiGate(f) if f.auth.mode == UserAuth::Eap => "username and password",
+            Vpn::FortiGate(_) => "pre-shared key only",
+            Vpn::Azure(_) => "Microsoft Entra ID",
+        }
+    }
+
     /// Copy under a new id, so it doesn't share keyring items with the original.
     pub fn duplicate(&self) -> Self {
         Self {
@@ -269,6 +409,14 @@ impl Profile {
 
     /// What must be fixed before this profile can be saved or used, beyond what its field types already guarantee.
     pub fn problems(&self) -> Vec<&'static str> {
+        self.fortigate()
+            .map(FortiGate::problems)
+            .unwrap_or_default()
+    }
+}
+
+impl FortiGate {
+    fn problems(&self) -> Vec<&'static str> {
         let mut v = Vec::new();
         if self.ike.proposals.is_empty() {
             v.push(NO_P1_PROPOSAL);
@@ -458,9 +606,40 @@ fn is_outdated(path: &Path, p: &Profile) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| table(&text) != table(&sparse(p)))
 }
 
-/// A profile file's settings; id and name are left for the caller.
+/// A profile file's settings; id and name are left for the caller. The `type` key picks the type, then the type's
+/// settings are read from the whole text, so an error names the line and key as toml reports them.
 pub fn parse_profile(s: &str) -> Result<Profile, String> {
-    toml::from_str(s).map_err(|e| e.to_string())
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Common {
+        description: Description,
+        r#type: Option<String>,
+    }
+    let err = |e: toml::de::Error| e.to_string();
+    // the whole file first: reading into the structs skips keys they don't know, values and all, so a broken value
+    // there (an integer too large, say) would otherwise pass unseen
+    toml::from_str::<toml::Table>(s).map_err(err)?;
+    let common: Common = toml::from_str(s).map_err(err)?;
+    let kind = match common.r#type.as_deref() {
+        None => Kind::FortiGateIkev2,
+        Some(id) => Kind::ALL
+            .into_iter()
+            .find(|k| k.id() == id)
+            .ok_or_else(|| {
+                format!(
+                    "Unknown connection type {id:?}. Archway knows {}.",
+                    Kind::ALL.map(Kind::id).join(", ")
+                )
+            })?,
+    };
+    let vpn = match kind {
+        Kind::FortiGateIkev2 => Vpn::FortiGate(toml::from_str(s).map_err(err)?),
+        Kind::AzureOpenvpn => Vpn::Azure(toml::from_str(s).map_err(err)?),
+    };
+    Ok(Profile {
+        description: common.description,
+        ..Profile::new(vpn)
+    })
 }
 
 /// `e` with every line cut at 200 characters: the TOML parser quotes the offending line, which can be megabytes long.
@@ -728,8 +907,12 @@ impl Config {
             c.orphans.clear();
             c.outdated.clear();
             c.load_errors.clear();
-            for p in c.profiles.iter_mut().filter(|p| !p.auth.save_password) {
-                p.auth.password.clear();
+            for p in &mut c.profiles {
+                if let Vpn::FortiGate(f) = &mut p.vpn
+                    && !f.auth.save_password
+                {
+                    f.auth.password.clear();
+                }
             }
             c
         }
@@ -874,8 +1057,8 @@ mod tests {
     fn profile_file_has_no_secrets_id_or_name() {
         let mut p = profile("Office");
         p.psk = "topsecret".into();
-        p.auth.password = "hunter2".into();
-        p.auth.save_password = true;
+        p.fg().auth.password = "hunter2".into();
+        p.fg().auth.save_password = true;
         assert_eq!(sparse(&p), "[auth]\nsave_password = true\n");
     }
 
@@ -1069,21 +1252,21 @@ mod tests {
     #[test]
     fn changed_profile_fields_round_trip() {
         let mut p = profile("Office");
-        p.gateway = Some("vpn.example.com".parse().unwrap());
-        p.sso.port = Port::new(10443).unwrap();
-        p.auth.mode = UserAuth::None;
-        p.ike.proposals = vec!["aes256-sha512".parse().unwrap()];
-        p.ike.dh_groups = vec![DhGroup::Ecp384, DhGroup::Ecp521];
-        p.esp.proposals = vec![
+        p.fg().gateway = Some("vpn.example.com".parse().unwrap());
+        p.fg().sso.port = Port::new(10443).unwrap();
+        p.fg().auth.mode = UserAuth::None;
+        p.fg().ike.proposals = vec!["aes256-sha512".parse().unwrap()];
+        p.fg().ike.dh_groups = vec![DhGroup::Ecp384, DhGroup::Ecp521];
+        p.fg().esp.proposals = vec![
             "aes192-sha384".parse().unwrap(),
             "aes128-sha1".parse().unwrap(),
         ];
-        p.network.route_mode = RouteMode::Custom;
-        p.network.custom_routes = vec![
+        p.fg().network.route_mode = RouteMode::Custom;
+        p.fg().network.custom_routes = vec![
             "10.0.0.0/8".parse().unwrap(),
             "192.168.10.0/24".parse().unwrap(),
         ];
-        p.network.mtu = Mtu::try_from(1300).unwrap();
+        p.fg().network.mtu = Mtu::try_from(1300).unwrap();
         let s = sparse(&p);
         assert!(
             s.contains("gateway = \"vpn.example.com\"")
@@ -1113,14 +1296,14 @@ mod tests {
     #[test]
     fn only_changed_keys_and_their_sections_are_written() {
         let mut p = profile("Office");
-        p.sso.port = Port::new(10443).unwrap();
+        p.fg().sso.port = Port::new(10443).unwrap();
         assert_eq!(sparse(&p), "[sso]\nport = 10443\n");
-        p.gateway = Some("vpn.example.com".parse().unwrap());
+        p.fg().gateway = Some("vpn.example.com".parse().unwrap());
         assert_eq!(
             sparse(&p),
             "gateway = \"vpn.example.com\"\n\n[sso]\nport = 10443\n"
         );
-        p.auth.username = Some("jane".parse().unwrap());
+        p.fg().auth.username = Some("jane".parse().unwrap());
         p.description = "Office".into();
         assert_eq!(
             sparse(&p),
@@ -1137,22 +1320,24 @@ mod tests {
         let p = parse_profile(s).unwrap();
         let want = Profile {
             description: "Office".into(),
-            gateway: Some("vpn.example.com".parse().unwrap()),
-            sso: Sso {
-                port: Port::new(10443).unwrap(),
-                verify_cert: false,
-                ..Sso::default()
-            },
-            auth: Auth {
-                username: Some("jane".parse().unwrap()),
-                ..Auth::default()
-            },
-            network: Network {
-                route_mode: RouteMode::Custom,
-                custom_routes: vec!["10.0.0.0/8".parse().unwrap()],
-                ..Network::default()
-            },
-            ..Profile::default()
+            ..Profile::new(Vpn::FortiGate(FortiGate {
+                gateway: Some("vpn.example.com".parse().unwrap()),
+                sso: Sso {
+                    port: Port::new(10443).unwrap(),
+                    verify_cert: false,
+                    ..Sso::default()
+                },
+                auth: Auth {
+                    username: Some("jane".parse().unwrap()),
+                    ..Auth::default()
+                },
+                network: Network {
+                    route_mode: RouteMode::Custom,
+                    custom_routes: vec!["10.0.0.0/8".parse().unwrap()],
+                    ..Network::default()
+                },
+                ..FortiGate::default()
+            }))
         };
         assert_eq!(
             Profile {
@@ -1170,13 +1355,19 @@ mod tests {
         let s = "[ike]\nnatt_keepalive = 20\n\n[sso]\ntimeout = 300\n\n[network]\nroute_mode = \"Custom\"\ncustom_routes = \"10.0.0.0/8, 192.168.10.0/24\"\n";
         let p = parse_profile(s).unwrap();
         assert_eq!(
-            p.network.custom_routes,
+            p.fortigate().unwrap().network.custom_routes,
             [
                 "10.0.0.0/8".parse::<Ipv4Net>().unwrap(),
                 "192.168.10.0/24".parse().unwrap()
             ]
         );
-        assert_eq!((p.ike.natt_keepalive.get(), p.sso.timeout.get()), (20, 300));
+        assert_eq!(
+            (
+                p.fortigate().unwrap().ike.natt_keepalive.get(),
+                p.fortigate().unwrap().sso.timeout.get()
+            ),
+            (20, 300)
+        );
         assert!(
             sparse(&p).contains("custom_routes = [\"10.0.0.0/8\", \"192.168.10.0/24\"]"),
             "Save writes the array"
@@ -1210,10 +1401,10 @@ mod tests {
     fn profile_problems_name_what_is_missing() {
         let mut p = profile("Office");
         assert!(p.problems().is_empty());
-        p.ike.proposals.clear();
-        p.ike.dh_groups.clear();
-        p.esp.proposals.clear();
-        p.network.route_mode = RouteMode::Custom;
+        p.fg().ike.proposals.clear();
+        p.fg().ike.dh_groups.clear();
+        p.fg().esp.proposals.clear();
+        p.fg().network.route_mode = RouteMode::Custom;
         assert_eq!(
             p.problems(),
             [NO_P1_PROPOSAL, NO_DH_GROUP, NO_P2_PROPOSAL, NO_ROUTES]
@@ -1236,10 +1427,55 @@ mod tests {
         assert_eq!(
             parse_profile("[esp]\nproposals = [\"AES256-Sha384\"]\n")
                 .unwrap()
+                .fortigate()
+                .unwrap()
                 .esp
                 .proposals,
             ["aes256-sha384".parse::<Proposal>().unwrap()]
         );
+    }
+
+    #[test]
+    fn the_type_key_picks_the_connection_type() {
+        // FortiGate files from before there were other types have no `type`, and Save keeps writing none
+        let p = parse_profile("gateway = \"vpn.example.com\"\n").unwrap();
+        assert_eq!(p.vpn.kind(), Kind::FortiGateIkev2);
+        assert!(!sparse(&p).contains("type"), "{}", sparse(&p));
+        assert_eq!(
+            parse_profile("type = \"fortigate-ikev2\"\n")
+                .unwrap()
+                .vpn
+                .kind(),
+            Kind::FortiGateIkev2
+        );
+        let e = parse_profile("type = \"wireguard\"\n").unwrap_err();
+        assert!(
+            e.contains("Unknown connection type \"wireguard\". Archway knows fortigate-ikev2, azure-openvpn."),
+            "{e}"
+        );
+        assert!(parse_profile("type = 1\n").unwrap_err().contains("type"));
+        // an Azure file needs its settings; FortiGate ones in it aren't taken
+        let e =
+            parse_profile("type = \"azure-openvpn\"\ngateway = \"vpn.example.com\"\n").unwrap_err();
+        assert!(e.contains("Azure gateway"), "{e}");
+    }
+
+    #[test]
+    fn an_error_names_the_line_and_key() {
+        let e = parse_profile("description = \"x\"\n\n[network]\nifname = \"a b\"\n").unwrap_err();
+        assert!(
+            e.contains("line 4") && e.contains("ifname") && e.contains("Use 1 to 15 letters"),
+            "{e}"
+        );
+        let e =
+            parse_profile("type = \"azure-openvpn\"\ngateway = \"vpn.example.com\"\n").unwrap_err();
+        assert!(e.contains("line 2") && e.contains("gateway"), "{e}");
+    }
+
+    #[test]
+    fn a_file_that_is_not_toml_is_refused_even_in_a_key_nobody_reads() {
+        // found by the profile_toml fuzzer: an unknown key's value was skipped without being checked
+        assert!(parse_profile("t=997199999999997199976").is_err());
     }
 
     #[test]
@@ -1249,7 +1485,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            (p.gateway.unwrap().to_string(), p.sso.port.get()),
+            (
+                p.fortigate().unwrap().gateway.clone().unwrap().to_string(),
+                p.fortigate().unwrap().sso.port.get()
+            ),
             ("g".to_string(), 8443)
         );
     }
@@ -1270,7 +1509,7 @@ mod tests {
             profiles: vec![profile("B"), profile("A")],
             ..Config::default()
         };
-        c.profiles[0].gateway = Some("b.example".parse().unwrap());
+        c.profiles[0].fg().gateway = Some("b.example".parse().unwrap());
         c.selected = 0; // "B"
         c.show_log = false;
         c.verbose = true;
@@ -1345,7 +1584,7 @@ mod tests {
         saved.save_to(&t.paths, &saved).unwrap();
         std::fs::write(t.paths.profile_file("A"), "# hand-written\n").unwrap();
         let mut c = saved.clone();
-        c.profiles[1].gateway = Some("b.example".parse().unwrap());
+        c.profiles[1].fg().gateway = Some("b.example".parse().unwrap());
         c.save_to(&t.paths, &saved).unwrap();
         assert_eq!(
             std::fs::read_to_string(t.paths.profile_file("A")).unwrap(),
@@ -1378,17 +1617,17 @@ mod tests {
         b.selected = 1;
         b.show_log = !a.show_log;
         b.orphans = vec![new_uid()];
-        b.profiles[0].auth.password = "typed".into(); // save_password is off
+        b.profiles[0].fg().auth.password = "typed".into(); // save_password is off
         assert!(a.settings_eq(&b));
 
         let mut saved = a.clone();
-        saved.profiles[0].auth.save_password = true;
+        saved.profiles[0].fg().auth.save_password = true;
         let mut typed = saved.clone();
-        typed.profiles[0].auth.password = "typed".into();
+        typed.profiles[0].fg().auth.password = "typed".into();
         assert!(!saved.settings_eq(&typed));
 
         let mut c = a.clone();
-        c.profiles[1].gateway = Some("vpn.example.com".parse().unwrap());
+        c.profiles[1].fg().gateway = Some("vpn.example.com".parse().unwrap());
         assert!(!a.settings_eq(&c));
     }
 
@@ -1450,8 +1689,26 @@ mod tests {
             "[auth]\nusername = \"jane \"\n\n[ike]\nlocal_id = \" client.example.com \"\n",
         )
         .unwrap();
-        assert_eq!(p.auth.username.unwrap().to_string(), "jane");
-        assert_eq!(p.ike.local_id.unwrap().to_string(), "client.example.com");
+        assert_eq!(
+            p.fortigate()
+                .unwrap()
+                .auth
+                .username
+                .clone()
+                .unwrap()
+                .to_string(),
+            "jane"
+        );
+        assert_eq!(
+            p.fortigate()
+                .unwrap()
+                .ike
+                .local_id
+                .clone()
+                .unwrap()
+                .to_string(),
+            "client.example.com"
+        );
     }
 
     #[test]
@@ -1501,7 +1758,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            (p.gateway, p.auth.username, p.ike.local_id),
+            (
+                p.fortigate().unwrap().gateway.clone(),
+                p.fortigate().unwrap().auth.username.clone(),
+                p.fortigate().unwrap().ike.local_id.clone()
+            ),
             (None, None, None)
         );
         let t = Tmp::new();

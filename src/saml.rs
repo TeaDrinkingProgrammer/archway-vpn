@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 const DONE_PAGE: &str = "<html><head><title>Archway</title></head><body style=\"font-family:sans-serif\">\
 <h3>✔ Signed in</h3><p>You can close this tab. Archway continues setting up the connection.</p></body></html>";
+const FAILED_PAGE: &str = "<html><head><title>Archway</title></head><body style=\"font-family:sans-serif\">\
+<h3>Sign-in failed</h3><p>You can close this tab. Archway shows what went wrong.</p></body></html>";
 
 pub struct SamlResult {
     pub username: String,
@@ -51,12 +53,12 @@ pub fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
-/// The `tokenid` and `username` of the browser's callback request `req` (the raw HTTP request, at least up to the end
-/// of its headers), each None when the query doesn't have it. Err for a request that can't be the browser coming back
-/// from the login: anything but a GET of `/`, or one a web page sent itself (a script's fetch or form, an image, a
-/// frame) instead of the FortiGate's top-level redirect. The FortiGate builds the callback URL, so it can't carry a
-/// nonce of ours; these checks keep other pages from slipping in a token of their own.
-pub fn callback_params(req: &[u8]) -> Result<(Option<String>, Option<String>), &'static str> {
+/// The query string of the browser's callback request `req` (the raw HTTP request, at least up to the end of its
+/// headers). Err for a request that can't be the browser coming back from the login: anything but a GET of `/`, or one
+/// a web page sent itself (a script's fetch or form, an image, a frame) instead of the identity provider's top-level
+/// redirect. The FortiGate builds its callback URL, so it can't carry a nonce of ours; these checks keep other pages
+/// from slipping in a token of their own.
+pub fn callback_query(req: &[u8]) -> Result<String, &'static str> {
     let text = String::from_utf8_lossy(req);
     let mut lines = text.lines();
     let mut request = lines.next().unwrap_or("").split_whitespace();
@@ -74,15 +76,12 @@ pub fn callback_params(req: &[u8]) -> Result<(Option<String>, Option<String>), &
         if name == "origin" {
             return Err("sent by a script on a web page");
         }
-        // Sec-Fetch-Dest says what the request is for; the FortiGate's redirect is a "document"
+        // Sec-Fetch-Dest says what the request is for; the identity provider's redirect is a "document"
         if name == "sec-fetch-dest" && !value.eq_ignore_ascii_case("document") {
             return Err("not a page navigation");
         }
     }
-    Ok((
-        query_param(query, "tokenid"),
-        query_param(query, "username"),
-    ))
+    Ok(query.to_string())
 }
 
 /// The uid of the process that owns the local end `peer` of a TCP connection to `ours`, from /proc/net/tcp. Ok(None)
@@ -150,7 +149,7 @@ fn port_error(p: &SamlParams, cause: &str) -> String {
 }
 
 /// Why waiting for a background request ended without its answer.
-enum Waited {
+pub enum Waited {
     Cancelled,
     /// the thread ended without sending (it panicked)
     Gone,
@@ -158,7 +157,7 @@ enum Waited {
 
 /// Run `f` on another thread and wait for it, so Cancel works while the gateway is slow or silent. An abandoned request
 /// ends at its own connect/read timeout.
-fn in_background<T: Send + 'static>(
+pub fn in_background<T: Send + 'static>(
     cancel: &AtomicBool,
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, Waited> {
@@ -270,11 +269,10 @@ pub fn login(
 ) -> Result<SamlResult, String> {
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("callback listener: {e}"))?;
-    listener.set_nonblocking(true).ok();
-    let local = listener
+    let rport = listener
         .local_addr()
-        .map_err(|e| format!("callback listener: {e}"))?;
-    let rport = local.port();
+        .map_err(|e| format!("callback listener: {e}"))?
+        .port();
 
     log(format!(
         "SAML: POST https://{}:{}/saml_login? (UID={}, REDIRECT_PORT={rport})",
@@ -333,26 +331,59 @@ pub fn login(
     log(format!("SAML: identity provider login URL: {url}"));
     on_url(&url);
     if p.open_browser {
-        // ARCHWAY_BROWSER overrides the opener (e.g. a specific browser, or a test harness)
-        let opener = std::env::var("ARCHWAY_BROWSER").unwrap_or_else(|_| "xdg-open".into());
-        match std::process::Command::new(&opener)
-            .arg(&url)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(_) => {}
-            Err(e) => log(format!(
-                "could not run {opener} ({e}); open the URL manually"
-            )),
-        }
+        open_browser(&url, &*log);
     }
     log(format!(
         "SAML: waiting up to {}s for the browser to return to http://127.0.0.1:{rport}/",
         p.timeout.as_secs()
     ));
 
-    let deadline = Instant::now() + p.timeout;
+    let res = wait_for_callback(&listener, p.timeout, cancel, &*log, |query| {
+        let token = query_param(query, "tokenid").filter(|t| !t.is_empty())?;
+        Some(Ok((
+            token,
+            query_param(query, "username").unwrap_or_default(),
+        )))
+    })?;
+    let (token, username) = res;
+    log(format!(
+        "SAML: success, username={username}, tokenid=<{} chars>",
+        token.len()
+    ));
+    Ok(SamlResult { username, token })
+}
+
+/// Open `url` in the browser. ARCHWAY_BROWSER overrides the opener (e.g. a specific browser, or a test harness).
+pub fn open_browser(url: &str, log: &dyn Fn(String)) {
+    let opener = std::env::var("ARCHWAY_BROWSER").unwrap_or_else(|_| "xdg-open".into());
+    if let Err(e) = std::process::Command::new(&opener)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        log(format!(
+            "could not run {opener} ({e}); open the URL manually"
+        ));
+    }
+}
+
+/// Wait up to `timeout` for the browser to come back to `listener`. Each callback's query goes to `take`; the first
+/// it returns Some for ends the wait with that result, and the browser gets the "signed in" or the "sign-in failed"
+/// page. Other requests get a 404, and connections from another user's process or that aren't the browser's redirect
+/// are ignored.
+pub fn wait_for_callback<T>(
+    listener: &TcpListener,
+    timeout: Duration,
+    cancel: &AtomicBool,
+    log: &dyn Fn(String),
+    mut take: impl FnMut(&str) -> Option<Result<T, String>>,
+) -> Result<T, String> {
+    let local = listener
+        .local_addr()
+        .map_err(|e| format!("callback listener: {e}"))?;
+    listener.set_nonblocking(true).ok();
+    let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if cancel.load(Ordering::SeqCst) {
             return Err("cancelled".into());
@@ -369,7 +400,7 @@ pub fn login(
         // checked before reading, so such a connection is dropped at once and can't stall the real callback
         if from_another_user(local, peer) {
             log(
-                "SAML: ignored a connection on the callback port (from another user's process)"
+                "sign-in: ignored a connection on the callback port (from another user's process)"
                     .into(),
             );
             continue;
@@ -384,11 +415,11 @@ pub fn login(
                 Ok(n) => req.extend_from_slice(&buf[..n]),
             }
         }
-        let (token, username) = match callback_params(&req) {
-            Ok(p) => p,
+        let query = match callback_query(&req) {
+            Ok(q) => q,
             Err(why) => {
                 log(format!(
-                    "SAML: ignored a request on the callback port ({why})"
+                    "sign-in: ignored a request on the callback port ({why})"
                 ));
                 let _ = s.write_all(
                     b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -396,22 +427,22 @@ pub fn login(
                 continue;
             }
         };
-        let resp = if token.is_some() {
+        let got = take(&query);
+        let page = |p: &str| {
             format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{DONE_PAGE}",
-                DONE_PAGE.len()
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{p}",
+                p.len()
             )
-        } else {
-            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+        };
+        let resp = match &got {
+            Some(Ok(_)) => page(DONE_PAGE),
+            Some(Err(_)) => page(FAILED_PAGE),
+            None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_string(),
         };
         let _ = s.write_all(resp.as_bytes());
-        if let Some(token) = token.filter(|t| !t.is_empty()) {
-            let username = username.unwrap_or_default();
-            log(format!(
-                "SAML: success, username={username}, tokenid=<{} chars>",
-                token.len()
-            ));
-            return Ok(SamlResult { username, token });
+        if let Some(r) = got {
+            return r;
         }
     }
     Err("SSO login timed out".into())
@@ -425,11 +456,11 @@ mod tests {
     fn only_the_browsers_redirect_is_a_callback() {
         let ok = b"GET /?tokenid=t%2B1&username=jane HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nSec-Fetch-Dest: document\r\n\r\n";
         assert_eq!(
-            callback_params(ok),
-            Ok((Some("t+1".into()), Some("jane".into())))
+            callback_query(ok).as_deref(),
+            Ok("tokenid=t%2B1&username=jane")
         );
         // no Sec-Fetch headers at all (an older browser): still the redirect
-        assert!(callback_params(b"GET /?tokenid=t HTTP/1.1\r\n\r\n").is_ok());
+        assert!(callback_query(b"GET /?tokenid=t HTTP/1.1\r\n\r\n").is_ok());
         for bad in [
             &b"POST /?tokenid=t HTTP/1.1\r\n\r\n"[..],
             b"GET /other?tokenid=t HTTP/1.1\r\n\r\n",
@@ -438,7 +469,7 @@ mod tests {
             b"GET /?tokenid=t HTTP/1.1\r\nSec-Fetch-Dest: iframe\r\n\r\n",
         ] {
             assert!(
-                callback_params(bad).is_err(),
+                callback_query(bad).is_err(),
                 "{}",
                 String::from_utf8_lossy(bad)
             );

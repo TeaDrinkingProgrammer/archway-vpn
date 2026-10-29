@@ -642,6 +642,167 @@ impl From<&str> for Description {
     }
 }
 
+/// A GUID such as an Entra tenant or app id: 8-4-4-4-12 hex digits, kept lowercase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Guid([u8; 36]);
+
+impl FromStr for Guid {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let b: [u8; 36] = s
+            .trim()
+            .to_ascii_lowercase()
+            .as_bytes()
+            .try_into()
+            .map_err(|_| format!("Expected a GUID, not {}.", quoted(s)))?;
+        let ok = b.iter().enumerate().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => *c == b'-',
+            _ => c.is_ascii_hexdigit(),
+        });
+        if ok {
+            Ok(Self(b))
+        } else {
+            Err(format!("Expected a GUID, not {}.", quoted(s)))
+        }
+    }
+}
+
+impl fmt::Display for Guid {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(std::str::from_utf8(&self.0).expect("hex digits and dashes are ASCII"))
+    }
+}
+
+/// An Azure VPN gateway, `azuregateway-<vnet-id>-<suffix>.<domain>`. Its certificate is issued to
+/// `<vnet-id>.<domain>`, not to the name dialled (see `cert_name`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AzureGateway {
+    name: DnsName,
+    vnet: Guid,
+}
+
+impl AzureGateway {
+    /// The name in the gateway's certificate: `<vnet-id>.<domain>`.
+    pub fn cert_name(&self) -> String {
+        let domain = self.name.0.split_once('.').map_or("", |(_, d)| d);
+        format!("{}.{domain}", self.vnet)
+    }
+}
+
+impl FromStr for AzureGateway {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || {
+            format!(
+                "Expected an Azure gateway name such as azuregateway-<id>-<suffix>.vpn.azure.com, not {}.",
+                quoted(s)
+            )
+        };
+        let name: DnsName = s.trim().parse().map_err(|_| bad())?;
+        let (first, domain) = name.0.split_once('.').ok_or_else(bad)?;
+        let vnet = first
+            .strip_prefix("azuregateway-")
+            .and_then(|r| r.get(..36).filter(|_| r[36..].starts_with('-')))
+            .and_then(|g| g.parse().ok())
+            .filter(|_| domain.contains('.'))
+            .ok_or_else(bad)?;
+        Ok(Self { name, vnet })
+    }
+}
+
+impl fmt::Display for AzureGateway {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl From<&AzureGateway> for Host {
+    fn from(g: &AzureGateway) -> Host {
+        Host::Name(g.name.clone())
+    }
+}
+
+/// An Entra tenant as the Azure VPN profile writes it: `https://<login host>/<tenant id>/`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Tenant {
+    pub host: DnsName,
+    pub id: Guid,
+}
+
+impl Tenant {
+    const HOSTS: [&str; 3] = [
+        "login.microsoftonline.com",
+        "login.microsoftonline.us",
+        "login.chinacloudapi.cn",
+    ];
+}
+
+impl FromStr for Tenant {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || {
+            format!(
+                "Expected a tenant such as https://login.microsoftonline.com/<tenant id>/, not {}.",
+                quoted(s)
+            )
+        };
+        let (host, path) = s
+            .trim()
+            .strip_prefix("https://")
+            .and_then(|r| r.split_once('/'))
+            .ok_or_else(bad)?;
+        // Entra's sign-in hosts (global, US Government, China): the code and PKCE verifier go nowhere else
+        if !Self::HOSTS.contains(&host) {
+            return Err(format!(
+                "{} is not a Microsoft Entra sign-in host ({}).",
+                quoted(host),
+                Self::HOSTS.join(", ")
+            ));
+        }
+        Ok(Self {
+            host: host.parse().map_err(|_| bad())?,
+            id: path.trim_end_matches('/').parse().map_err(|_| bad())?,
+        })
+    }
+}
+
+impl fmt::Display for Tenant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "https://{}/{}/", self.host, self.id)
+    }
+}
+
+/// The SHA-1 fingerprint of a certificate, written as 40 hex digits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct CertPin(pub [u8; 20]);
+
+impl FromStr for CertPin {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        data_encoding::HEXUPPER_PERMISSIVE
+            .decode(s.trim().as_bytes())
+            .ok()
+            .and_then(|v| v.try_into().ok())
+            .map(Self)
+            .ok_or_else(|| {
+                format!(
+                    "Expected a SHA-1 fingerprint of 40 hex digits, not {}.",
+                    quoted(s)
+                )
+            })
+    }
+}
+
+impl fmt::Display for CertPin {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&data_encoding::HEXUPPER.encode(&self.0))
+    }
+}
+
 /// serde through `String` for the types above that parse from text.
 macro_rules! string_type {
     ($($t:ty),*) => {$(
@@ -666,7 +827,11 @@ string_type!(
     Proposal,
     ClientUid,
     Description,
-    ProfileName
+    ProfileName,
+    Guid,
+    AzureGateway,
+    Tenant,
+    CertPin
 );
 
 /// serde for `Username` and `LocalId`: older versions wrote what was typed, spaces around it included, and trimmed it
@@ -1138,6 +1303,51 @@ mod tests {
             "Expected a host name or IPv4 address, not \"a;b\".",
             "short input is quoted as is"
         );
+    }
+
+    #[test]
+    fn azure_gateway_cert_name_is_the_vnet_id() {
+        let g: AzureGateway =
+            "azuregateway-0000AAAA-1111-2222-3333-444455556666-0a1b2c3d4e5f.vpn.azure.com"
+                .parse()
+                .unwrap();
+        assert_eq!(
+            g.cert_name(),
+            "0000aaaa-1111-2222-3333-444455556666.vpn.azure.com"
+        );
+        for bad in [
+            "vpn.example.com",
+            "azuregateway-0000aaaa-1111-2222-3333-444455556666.vpn.azure.com",
+            "azuregateway-0000aaaa-1111-2222-3333-44445555666x-ab.vpn.azure.com",
+            "azuregateway-0000aaaa-1111-2222-3333-444455556666-ab.com",
+            "azuregateway-é",
+        ] {
+            assert!(bad.parse::<AzureGateway>().is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn tenant_guid_and_pin() {
+        let t: Tenant = "https://login.microsoftonline.com/0000AAAA-1111-2222-3333-444455556666/"
+            .parse()
+            .unwrap();
+        assert_eq!(t.host.to_string(), "login.microsoftonline.com");
+        assert_eq!(
+            t.to_string(),
+            "https://login.microsoftonline.com/0000aaaa-1111-2222-3333-444455556666/"
+        );
+        for bad in [
+            "http://login.microsoftonline.com/0000aaaa-1111-2222-3333-444455556666/",
+            "https://login.microsoftonline.com/common/",
+            "https://a b/0000aaaa-1111-2222-3333-444455556666/",
+            "https://login.example.com/0000aaaa-1111-2222-3333-444455556666/",
+        ] {
+            assert!(bad.parse::<Tenant>().is_err(), "{bad:?}");
+        }
+        assert!("0000aaaa111122223333444455556666".parse::<Guid>().is_err());
+        let pin: CertPin = "df3c24f9bfd666761b268073fe06d1cc8d4f82a4".parse().unwrap();
+        assert_eq!(pin.to_string(), "DF3C24F9BFD666761B268073FE06D1CC8D4F82A4");
+        assert!("df3c".parse::<CertPin>().is_err());
     }
 
     #[test]

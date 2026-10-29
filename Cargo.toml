@@ -5,7 +5,7 @@ edition = "2024"
 # egui needs 1.95; checked by the msrv job in .github/workflows/ci.yml
 rust-version = "1.95"
 authors = ["Stijn van Houwelingen <teadrinkingprogrammer@proton.me>", "Wilco van Beijnum <github@wilcovanbeijnum.nl>"]
-description = "Connect to FortiGate IPsec (IKEv2) VPNs with SAML single sign-on"
+description = "Connect to FortiGate IPsec (IKEv2) and Azure VPN (Microsoft Entra ID) gateways with single sign-on"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
 homepage = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
@@ -15,7 +15,9 @@ homepage = "https://github.com/TeaDrinkingProgrammer/archway-vpn"
 fuzzing = []
 
 [dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
 async-io = "2.6.0"
+data-encoding = "2"
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "clipboard", "glow", "links", "wayland", "x11"] }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color", "humantime"] }
 futures-util = "0.3.34"
@@ -25,6 +27,9 @@ libc = "0.2.190"
 netlink-packet-route = "0.33"
 netlink-sys = "0.9"
 opener = { version = "0.9.0", features = ["reveal"] }
+percent-encoding = "2"
+quick-xml = "0.41"
+ring = "0.17"
 rtnetlink = { version = "0.23", default-features = false, features = ["smol_socket"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.4"
@@ -37,6 +42,7 @@ vec1 = { version = "1.12", features = ["serde"] }
 x509-parser = "0.18.1"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 zeroize = "1.9"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [lints.clippy]
 # the backend runs as root: every unsafe block says why it is sound

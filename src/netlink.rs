@@ -193,6 +193,47 @@ pub fn route_to(dst: Ipv4Addr) -> Result<(Option<Ipv4Addr>, IfIndex), String> {
     Ok((gw, IfIndex::from_kernel(oif)?))
 }
 
+/// The IPv4 address of interface `name` and the IPv4 networks routed through it (main table), for an interface another
+/// program set up. Needs no privileges.
+pub fn ipv4_of(name: &IfName) -> Result<(Option<Ipv4Addr>, Vec<Ipv4Net>), String> {
+    use netlink_packet_route::address::{AddressAttribute, AddressMessage};
+    let index = link_index(name)?.ok_or_else(|| format!("interface {name} doesn't exist"))?;
+    let addrs: Vec<AddressMessage> = with_handle(async |h| {
+        h.address()
+            .get()
+            .set_link_index_filter(index.get())
+            .execute()
+            .try_collect()
+            .await
+    })?;
+    let ip = addrs
+        .iter()
+        .flat_map(|a| &a.attributes)
+        .find_map(|a| match a {
+            AddressAttribute::Local(std::net::IpAddr::V4(ip)) => Some(*ip),
+            _ => None,
+        });
+    let msg = RouteMessageBuilder::<Ipv4Addr>::new().build();
+    let all: Vec<RouteMessage> =
+        with_handle(async |h| h.route().get(msg).execute().try_collect().await)?;
+    let mut routes = Vec::new();
+    for r in all.iter().filter(|r| r.header.table == libc::RT_TABLE_MAIN) {
+        let mut dst = Ipv4Addr::UNSPECIFIED;
+        let mut through = false;
+        for a in &r.attributes {
+            match a {
+                RouteAttribute::Destination(RouteAddress::Inet(d)) => dst = *d,
+                RouteAttribute::Oif(i) => through = *i == index.get(),
+                _ => {}
+            }
+        }
+        if through && let Ok(n) = Ipv4Net::new(dst, r.header.destination_prefix_length) {
+            routes.push(n);
+        }
+    }
+    Ok((ip, routes))
+}
+
 /// The two halves of IPv6 the block makes unreachable: `::/1` and `8000::/1`.
 const V6_HALVES: [Ipv6Addr; 2] = [
     Ipv6Addr::UNSPECIFIED,

@@ -217,7 +217,7 @@ fn view_state_and_unsaved_password_are_not_changes() {
     app.save();
     app.cfg.selected = 1;
     app.cfg.show_log = !app.cfg.show_log;
-    app.cfg.profiles[0].auth.password = "typed".into(); // "Save password" is off
+    app.cfg.profiles[0].fg().auth.password = "typed".into(); // "Save password" is off
     assert!(!app.unsaved());
 }
 
@@ -766,8 +766,11 @@ fn type_bad_gateway(app: &mut App, i: usize) {
         DraftOwner::Profile(app.cfg.profiles[i].id.clone()),
         Field::Gateway,
     );
-    app.drafts
-        .edit_opt(key, "vpn example".into(), &mut app.cfg.profiles[i].gateway);
+    app.drafts.edit_opt(
+        key,
+        "vpn example".into(),
+        &mut app.cfg.profiles[i].fg().gateway,
+    );
 }
 
 fn label_shown(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> bool {
@@ -880,7 +883,7 @@ fn deleting_a_profile_drops_its_drafts() {
 fn empty_custom_routes_block_save() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles[0].network.route_mode = RouteMode::Custom;
+    app.cfg.profiles[0].fg().network.route_mode = RouteMode::Custom;
     assert_eq!(
         app.problems()
             .iter()
@@ -1044,11 +1047,11 @@ fn a_field_the_mode_does_not_use_does_not_block() {
     app.drafts.edit_opt(
         key.clone(),
         "jané".into(),
-        &mut app.cfg.profiles[0].auth.username,
+        &mut app.cfg.profiles[0].fg().auth.username,
     );
-    assert!(app.cfg.profiles[0].sso.enabled);
+    assert!(app.cfg.profiles[0].fortigate().unwrap().sso.enabled);
     assert!(app.problems().is_empty(), "SSO doesn't use the username");
-    app.cfg.profiles[0].sso.enabled = false;
+    app.cfg.profiles[0].fg().sso.enabled = false;
     assert_eq!(
         app.problems().len(),
         1,
@@ -1213,7 +1216,7 @@ fn typing_an_invalid_gateway_keeps_focus_and_the_label_above_the_field() {
 fn typing_a_custom_route_is_not_reformatted_halfway() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles[0].network.route_mode = RouteMode::Custom;
+    app.cfg.profiles[0].fg().network.route_mode = RouteMode::Custom;
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     frame_focus(&ctx, &mut app, vec![]);
@@ -1235,7 +1238,11 @@ fn typing_a_custom_route_is_not_reformatted_halfway() {
     );
     type_slowly(&ctx, &mut app, Field::CustomRoutes, "10.0.0.0/8");
     assert_eq!(
-        app.cfg.profiles[0].network.custom_routes,
+        app.cfg.profiles[0]
+            .fortigate()
+            .unwrap()
+            .network
+            .custom_routes,
         ["10.0.0.0/8".parse::<net::Ipv4Net>().unwrap()]
     );
 }
@@ -1466,7 +1473,7 @@ fn long_names_truncate_without_moving_the_buttons() {
     let connect_rect = |name: &str| {
         let mut app = app_with(&MemoryStore::default());
         app.cfg.profiles[0].name = name.parse().unwrap();
-        app.cfg.profiles[0].gateway = Some("vpn.example.com".parse().unwrap());
+        app.cfg.profiles[0].fg().gateway = Some("vpn.example.com".parse().unwrap());
         app.cfg.profiles[0].psk = "k".into();
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
@@ -1556,7 +1563,7 @@ fn stat_cards_fit_the_default_window() {
 fn fix_button_scrolls_the_field_into_view() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());
-    app.cfg.profiles[0].sso.enabled = false;
+    app.cfg.profiles[0].fg().sso.enabled = false;
     app.cfg.show_log = true;
     app.error = Some(diag(
         "error",
@@ -1695,6 +1702,108 @@ fn name_and_description_are_edited_in_one_place_the_status_card() {
             editors[0].1.bounds().unwrap().y1 < card.y0,
             "{} is edited in the status card",
             f.label()
+        );
+    }
+}
+
+#[test]
+fn new_connection_lists_the_types_and_blocks_one_whose_engine_is_missing() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    app_frame(&ctx, &mut app, vec![]);
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "New Connection")]);
+    // what's installed differs per machine: say what is
+    let nc = app.new_connection.as_mut().expect("the dialog is open");
+    nc.missing = [None, Some(crate::openvpn3::install_hint())];
+    nc.gateway = "vpn.example.com".into();
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    for kind in crate::config::Kind::ALL {
+        assert!(
+            button(&nodes, kind.name()).is_some(),
+            "{} listed",
+            kind.name()
+        );
+    }
+    let n = app.cfg.profiles.len();
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "Add Connection")]);
+    assert!(app.new_connection.is_none(), "added: the dialog closes");
+    assert_eq!(app.cfg.profiles.len(), n + 1);
+    let added = &app.cfg.profiles[app.cfg.selected];
+    assert_eq!(added.gateway_text(), "vpn.example.com");
+    assert_eq!(added.vpn.kind(), crate::config::Kind::FortiGateIkev2);
+
+    // Azure VPN without OpenVPN 3: the note says so and Import Profile can't be clicked, even with a profile picked
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "New Connection")]);
+    let nc = app.new_connection.as_mut().unwrap();
+    nc.missing = [None, Some(crate::openvpn3::install_hint())];
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "Azure VPN")]);
+    let az = crate::azure::Azure {
+        gateway: "azuregateway-0000aaaa-1111-2222-3333-444455556666-0a1b2c3d4e5f.vpn.azure.com"
+            .parse()
+            .unwrap(),
+        tenant: "https://login.microsoftonline.com/99999999-8888-7777-6666-555555555555/"
+            .parse()
+            .unwrap(),
+        audience: "c632b3df-fb67-4d84-bdcf-b95ad541b5c8".parse().unwrap(),
+        root: "DF3C24F9BFD666761B268073FE06D1CC8D4F82A4".parse().unwrap(),
+    };
+    app.new_connection.as_mut().unwrap().picked = Some(Ok(Profile {
+        name: "office-vnet".into(),
+        psk: "0".repeat(512),
+        ..Profile::new(Vpn::Azure(az))
+    }));
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    assert!(label_shown(&nodes, "OpenVPN 3 Linux isn't installed."));
+    assert!(button(&nodes, "Import Profile").unwrap().is_disabled());
+    let n = app.cfg.profiles.len();
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "Import Profile")]);
+    assert_eq!(app.cfg.profiles.len(), n, "nothing imported");
+
+    // installed: it imports
+    app.new_connection.as_mut().unwrap().missing = [None, None];
+    let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
+    app_frame(&ctx, &mut app, vec![click_event(&nodes, "Import Profile")]);
+    assert_eq!(app.cfg.profiles.len(), n + 1);
+    assert_eq!(
+        app.cfg.profiles[app.cfg.selected].vpn.kind(),
+        crate::config::Kind::AzureOpenvpn
+    );
+    assert!(app.new_connection.is_none());
+}
+
+#[test]
+fn new_connection_fits_the_smallest_window() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    app.new_connection = Some(NewConnection::open());
+    let nc = app.new_connection.as_mut().unwrap();
+    // the tallest form: Azure VPN with the missing-engine note and a picked profile's preview
+    nc.kind = crate::config::Kind::AzureOpenvpn;
+    nc.missing = [None, Some(crate::openvpn3::install_hint())];
+    nc.picked = Some(Err(crate::azure::import_file(b"not a profile").unwrap_err()));
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let size = egui::vec2(760.0, 520.0); // the window's minimum (main.rs)
+    let (nodes, _) = sized_frames(&mut app, &ctx, size, 3, vec![]);
+    for label in [
+        "Close",
+        "FortiGate",
+        "Azure VPN",
+        "Cancel",
+        "Import Profile",
+    ] {
+        let b = button(&nodes, label)
+            .unwrap_or_else(|| panic!("{label} shown"))
+            .bounds()
+            .unwrap();
+        assert!(
+            b.x0 >= 0.0 && b.y0 >= 0.0 && b.x1 <= 760.0 && b.y1 <= 520.0,
+            "{label} inside the window: {b:?}"
         );
     }
 }

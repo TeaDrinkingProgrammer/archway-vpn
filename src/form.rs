@@ -53,10 +53,13 @@ impl Field {
     /// username while SSO is on, custom routes outside Custom routing) blocks nothing; it's kept, and counts again once
     /// the mode uses the field.
     pub fn in_use(self, p: &Profile) -> bool {
+        let Some(f) = p.fortigate() else {
+            return !matches!(self, Field::Username | Field::SsoPort | Field::CustomRoutes);
+        };
         match self {
-            Field::Username => !p.sso.enabled && p.auth.mode == UserAuth::Eap,
-            Field::SsoPort => p.sso.enabled,
-            Field::CustomRoutes => p.network.route_mode == RouteMode::Custom,
+            Field::Username => !f.sso.enabled && f.auth.mode == UserAuth::Eap,
+            Field::SsoPort => f.sso.enabled,
+            Field::CustomRoutes => f.network.route_mode == RouteMode::Custom,
             _ => true,
         }
     }
