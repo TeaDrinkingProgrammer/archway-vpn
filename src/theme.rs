@@ -23,6 +23,7 @@ pub mod icon {
         TERMINAL = "\u{e20a}", SETTINGS = "\u{e154}", GLOBE = "\u{e0e8}", CHEVRON_RIGHT = "\u{e06f}",
         CHEVRON_DOWN = "\u{e06d}", ARROW_LEFT = "\u{e048}", EXTERNAL_LINK = "\u{e0b9}", REFRESH = "\u{e145}",
         CIRCLE_ALERT = "\u{e077}", HOURGLASS = "\u{e296}", LOG_IN = "\u{e10d}", LOCK = "\u{e10b}",
+        FILE_INPUT = "\u{e0c5}", SHIELD = "\u{e158}", CLOUD = "\u{e088}",
     }
 }
 

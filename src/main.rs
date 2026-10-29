@@ -3,15 +3,18 @@
 //! vici.rs); the xfrm interface, routes and DNS are set up over netlink and D-Bus (tunnel.rs, netlink.rs, resolved.rs).
 //! The same binary is the privileged backend: `pkexec archway-vpn --backend` (see backend.rs).
 
+mod azure;
 mod backend;
 mod charon;
 mod config;
 mod diag;
+mod entra;
 mod form;
 mod glide;
 mod keyring;
 mod net;
 mod netlink;
+mod openvpn3;
 mod privdrop;
 mod protocol;
 mod resolved;
@@ -29,7 +32,7 @@ use backend::{Event, Session};
 use config::*;
 use eframe::egui::{self, RichText};
 use form::{DraftOwner, Field};
-use net::{ClientUid, Ipv4Net};
+use net::{ClientUid, IfName, Ipv4Net, ProfileName};
 use protocol::BackendEvent;
 use std::net::Ipv4Addr;
 use std::path::Path;
@@ -63,12 +66,19 @@ enum State {
 }
 
 impl State {
-    fn label(self) -> &'static str {
+    /// For a connection of type `kind`: what it is negotiating differs.
+    fn label(self, kind: Kind) -> &'static str {
         match self {
             State::Idle => "Disconnected",
-            State::Authenticating => "Waiting for SSO login in your browser…",
+            State::Authenticating => match kind {
+                Kind::FortiGateIkev2 => "Waiting for SSO login in your browser…",
+                Kind::AzureOpenvpn => "Waiting for the Microsoft sign-in in your browser…",
+            },
             State::Elevating => "Waiting for root authorization…",
-            State::Negotiating => "Negotiating IKEv2…",
+            State::Negotiating => match kind {
+                Kind::FortiGateIkev2 => "Negotiating IKEv2…",
+                Kind::AzureOpenvpn => "Connecting to the Azure VPN gateway…",
+            },
             State::Connected => "Connected",
             State::Disconnecting => "Disconnecting…",
         }
@@ -81,6 +91,8 @@ struct TunnelInfo {
     /// the SSO account this connection signed in with last time, when it was another one than `username`
     previous_user: Option<String>,
     ip: Option<Ipv4Addr>,
+    /// the tunnel interface, once it's up
+    ifname: Option<IfName>,
     routes: Vec<Ipv4Net>,
     full_tunnel: bool,
     saml_url: String,
@@ -129,6 +141,84 @@ struct App {
     stats: (u64, u64),
     stats_at: Option<Instant>,
     glide: glide::Glide,
+    new_connection: Option<NewConnection>,
+}
+
+/// The open New Connection dialog: a list of connection types, and the selected type's first settings.
+struct NewConnection {
+    kind: Kind,
+    /// why each type can't connect on this system (`Kind::missing_engine`), in `Kind::ALL` order; checked when the
+    /// dialog opened
+    missing: [Option<String>; Kind::ALL.len()],
+    /// FortiGate: what's typed
+    name: String,
+    gateway: String,
+    /// Azure VPN: the profile from the file picked, or why that file can't be imported
+    picked: Option<Result<Profile, String>>,
+    /// the desktop's file dialog, while it's open: its profile, None when cancelled
+    picking: Option<Receiver<Result<Option<Profile>, String>>>,
+}
+
+impl NewConnection {
+    fn open() -> Self {
+        Self {
+            kind: Kind::ALL[0],
+            missing: Kind::ALL.map(Kind::missing_engine),
+            name: ProfileName::default().to_string(),
+            gateway: String::new(),
+            picked: None,
+            picking: None,
+        }
+    }
+
+    fn missing(&self, kind: Kind) -> Option<&str> {
+        self.missing[kind as usize].as_deref()
+    }
+
+    /// Why a connection of `kind` can't be added here: its engine's missing, as a sentence.
+    fn blocked(&self, kind: Kind) -> Option<String> {
+        self.missing(kind)
+            .and_then(diag::Diag::parse)
+            .map(|d| diag::sentence(&d.headline))
+    }
+
+    /// The FortiGate connection typed in, or why it can't be added.
+    fn fortigate(&self) -> Result<Profile, String> {
+        let name = self.name.parse::<ProfileName>()?;
+        let gateway = match self.gateway.trim() {
+            "" => None,
+            g => Some(g.parse::<net::Host>()?),
+        };
+        Ok(Profile {
+            name,
+            ..Profile::new(Vpn::FortiGate(FortiGate {
+                gateway,
+                ..FortiGate::default()
+            }))
+        })
+    }
+
+    /// Choose File…: ask for the file in the desktop's file dialog (XDG portal), off the UI thread.
+    fn pick(&mut self, ctx: &egui::Context) {
+        let (tx, rx) = channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(pick_profile());
+            ctx.request_repaint();
+        });
+        self.picking = Some(rx);
+    }
+
+    /// The file dialog's answer, once it's there.
+    fn poll(&mut self) {
+        let Some(answer) = self.picking.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+            return;
+        };
+        self.picking = None;
+        if let Some(r) = answer.transpose() {
+            self.picked = Some(r);
+        }
+    }
 }
 
 impl App {
@@ -187,6 +277,7 @@ impl App {
             stats: (0, 0),
             stats_at: None,
             glide: glide::Glide::default(),
+            new_connection: None,
         };
         if !config_path().exists() {
             app.save(); // writes the generated UID on first start
@@ -431,10 +522,10 @@ impl App {
         self.push_log(format!(
             "=== connecting \"{}\" ({}) ===",
             p.name,
-            gateway_text(&p)
+            p.gateway_text()
         ));
         // without SSO there is no browser step: go straight to the root prompt
-        self.state = if p.sso.enabled {
+        self.state = if p.fortigate().is_none_or(|f| f.sso.enabled) {
             State::Authenticating
         } else {
             State::Elevating
@@ -492,12 +583,13 @@ impl App {
             }
             BackendEvent::IkeStart { .. } => self.state = State::Negotiating,
             BackendEvent::TunnelUp {
+                ifname,
                 ip,
                 routes,
                 full_tunnel,
-                ..
             } => {
                 self.info.ip = Some(ip);
+                self.info.ifname = Some(ifname);
                 self.info.routes = routes;
                 self.info.full_tunnel = full_tunnel;
             }
@@ -520,7 +612,9 @@ impl App {
             return;
         }
         if self.stats_at.is_none_or(|t| t.elapsed().as_millis() > 900) {
-            let ifn = &self.cfg.profiles[self.profile_connected].network.ifname;
+            let Some(ifn) = &self.info.ifname else {
+                return;
+            };
             let rd = |f: &str| {
                 std::fs::read_to_string(format!("/sys/class/net/{ifn}/statistics/{f}"))
                     .ok()
@@ -531,6 +625,69 @@ impl App {
             self.stats_at = Some(Instant::now());
         }
     }
+}
+
+/// Ask for the Azure portal's zip (or its `azurevpnconfig.xml`) and import it; Ok(None) when the dialog was cancelled.
+fn pick_profile() -> Result<Option<Profile>, String> {
+    use ashpd::desktop::file_chooser::{FileFilter, SelectedFiles};
+    let cant = |e: String| {
+        diag(
+            "error",
+            "the file dialog couldn't be opened",
+            &e,
+            "check that xdg-desktop-portal is running",
+        )
+    };
+    let picked = async_io::block_on(async {
+        SelectedFiles::open_file()
+            .title("Import Azure VPN Profile")
+            .modal(true)
+            .multiple(false)
+            .filter(
+                FileFilter::new("Azure VPN client package (.zip) or azurevpnconfig.xml")
+                    .glob("*.zip")
+                    .glob("*.xml"),
+            )
+            .send()
+            .await?
+            .response()
+    });
+    let files = match picked {
+        Ok(f) => f,
+        Err(ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)) => return Ok(None),
+        Err(e) => return Err(cant(e.to_string())),
+    };
+    let Some(path) = files.uris().first().and_then(|u| file_path(u.as_str())) else {
+        return Ok(None);
+    };
+    // the portal's zip is a few kB; anything much bigger isn't one
+    let read = std::fs::File::open(&path).and_then(|f| {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(f, azure::MAX_FILE + 1), &mut bytes)?;
+        if bytes.len() as u64 > azure::MAX_FILE {
+            return Err(std::io::Error::other(
+                "It's larger than 1 MiB, and the Azure portal's zip is a few kB.",
+            ));
+        }
+        Ok(bytes)
+    });
+    let bytes = read.map_err(|e| {
+        diag(
+            "error",
+            &format!("{} couldn't be read", path.display()),
+            &e.to_string(),
+            "choose another file",
+        )
+    })?;
+    azure::import_file(&bytes).map(Some)
+}
+
+/// The local path of a `file://` URI, percent-decoded byte for byte (a path can be any bytes).
+fn file_path(uri: &str) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    let bytes: Vec<u8> =
+        percent_encoding::percent_decode_str(uri.strip_prefix("file://")?).collect();
+    Some(std::ffi::OsString::from_vec(bytes).into())
 }
 
 /// A connect error as the app shows errors (see `diag`): messages that aren't in that form yet become its note.
@@ -547,17 +704,13 @@ fn connect_error(message: String) -> String {
     }
 }
 
-/// The profile's gateway for messages, empty if it has none.
-fn gateway_text(p: &Profile) -> String {
-    p.gateway
-        .as_ref()
-        .map_or_else(String::new, ToString::to_string)
-}
-
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.handle_events();
+        if let Some(nc) = &mut self.new_connection {
+            nc.poll();
+        }
         let problems = self.problems();
         if std::mem::take(&mut self.want_attention) {
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(

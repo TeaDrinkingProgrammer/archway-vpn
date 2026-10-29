@@ -4,12 +4,15 @@
 #![cfg(feature = "fuzzing")]
 #![doc(hidden)]
 
+pub mod azure;
 pub mod backend;
 pub mod charon;
 pub mod config;
 pub mod diag;
+pub mod entra;
 pub mod net;
 pub mod netlink;
+pub mod openvpn3;
 pub mod privdrop;
 pub mod protocol;
 pub mod resolved;

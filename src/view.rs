@@ -144,7 +144,7 @@ impl App {
                         }
                         ui.add_space(6.0);
                         if theme::list_button(ui, !busy, icon::PLUS, "New Connection").clicked() {
-                            self.add_profile(Profile::default());
+                            self.new_connection = Some(NewConnection::open());
                         }
                     });
             });
@@ -219,7 +219,7 @@ impl App {
             theme::title(ui, shown, 14.5),
             room - buttons as f32 * ROW_BUTTON - warn_room,
         );
-        let gateway = gateway_text(p);
+        let gateway = p.gateway_text();
         let sub = fit(
             ui,
             RichText::new(if gateway.is_empty() {
@@ -327,6 +327,7 @@ impl App {
 
     /// The open confirmation, if any: delete the selected connection, or regenerate the client UID.
     pub(crate) fn dialogs(&mut self, ctx: &egui::Context) {
+        self.new_connection_dialog(ctx);
         if self.confirm_delete {
             let title = format!("Delete “{}”?", self.shown_name(self.cfg.selected));
             let body =
@@ -360,6 +361,94 @@ impl App {
             ) {
                 self.regenerate_uid(yes);
             }
+        }
+    }
+
+    /// New Connection: the connection types as a list on the left (more types only add rows), the selected type's
+    /// first settings on the right. A type whose VPN engine isn't installed says so and can't be added.
+    fn new_connection_dialog(&mut self, ctx: &egui::Context) {
+        let Some(nc) = &mut self.new_connection else {
+            return;
+        };
+        let mut close = false;
+        let mut added = None;
+        // never larger than the window: the list and the form scroll inside, the buttons stay in view below them
+        let window = ctx.content_rect().size();
+        let width = (window.x - 64.0).min(720.0);
+        let body = (window.y - 190.0).clamp(140.0, 380.0);
+        let modal = egui::Modal::new(egui::Id::unique("new_connection")).show(ctx, |ui| {
+            ui.set_width(width);
+            ui.horizontal(|ui| {
+                ui.label(theme::title(ui, "New Connection", 18.0));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    close |= theme::icon_button(ui, icon::X, "Close", false).clicked();
+                });
+            });
+            ui.separator();
+            let mut footer = None;
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(200.0);
+                    theme::eyebrow(ui, "Connection type");
+                    egui::ScrollArea::vertical()
+                        .id_salt("connection types")
+                        .max_height(body - 24.0)
+                        .show(ui, |ui| {
+                            for kind in Kind::ALL {
+                                let missing = nc.missing(kind).is_some();
+                                if kind_row(ui, kind, nc.kind == kind, missing).clicked() {
+                                    nc.kind = kind;
+                                }
+                            }
+                        });
+                });
+                // as tall as the form: a plain separator takes all the height left in the modal
+                ui.add_sized([8.0, body], egui::Separator::default().vertical());
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .id_salt(("connection form", nc.kind.name()))
+                        .max_height(body)
+                        .min_scrolled_height(body)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 12.0;
+                            footer = Some(match nc.kind {
+                                Kind::FortiGateIkev2 => fortigate_form(ui, nc),
+                                Kind::AzureOpenvpn => azure_form(ui, nc),
+                            });
+                        });
+                });
+            });
+            ui.separator();
+            let Some(Footer {
+                label,
+                blocked,
+                profile,
+            }) = footer
+            else {
+                return;
+            };
+            // one row: a right-to-left layout on its own would centre in all the height left
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let r = theme::solid(ui, blocked.is_none(), Tone::Primary, "", label);
+                    if let Some(why) = &blocked {
+                        r.on_disabled_hover_text(why);
+                    } else if r.clicked() {
+                        added = profile;
+                    }
+                    close |= theme::button(ui, true, "", "Cancel").clicked();
+                });
+            });
+        });
+        if let Some(p) = added {
+            self.error = None;
+            self.add_profile(p);
+            close = true;
+        }
+        if close || modal.should_close() {
+            self.new_connection = None;
         }
     }
 
@@ -502,7 +591,7 @@ impl App {
         match fix {
             Fix::Gateway => form::field_id(&(owner, Field::Gateway)),
             Fix::Psk => secret_id(&owner, "psk"),
-            Fix::Credentials if p.auth.username.is_none() => {
+            Fix::Credentials if p.fortigate().is_some_and(|f| f.auth.username.is_none()) => {
                 form::field_id(&(owner, Field::Username))
             }
             Fix::Credentials => secret_id(&owner, "password"),
@@ -520,21 +609,15 @@ impl App {
         }];
         let (name, gateway, description) = (
             p.name.to_string(),
-            gateway_text(p),
+            p.gateway_text(),
             p.description.to_string(),
         );
-        let auth = if p.sso.enabled {
-            "SSO"
-        } else if p.auth.mode == UserAuth::Eap {
-            "username and password"
-        } else {
-            "pre-shared key only"
-        };
+        let (kind, auth) = (p.vpn.kind(), p.sign_in());
         let state = match (self.state, self.since) {
             (State::Connected, Some(since)) => {
                 format!("Connected · {}", duration(since.elapsed().as_secs()))
             }
-            (s, _) => s.label().to_string(),
+            (s, _) => s.label(kind).to_string(),
         };
         let kind = match self.state {
             State::Idle => PillKind::Idle,
@@ -791,15 +874,16 @@ impl App {
                 );
             });
         } else if self.state == State::Authenticating
+            && let p = &self.cfg.profiles[self.profile_connected]
+            && let Some(f) = p.fortigate()
             && self
                 .connect_started
                 .is_some_and(|at| at.elapsed().as_secs() >= 5)
         {
-            let p = &self.cfg.profiles[self.profile_connected];
             let msg = format!(
                 "No answer from {}:{} yet. The SSO port may be wrong.",
-                gateway_text(p),
-                p.sso.port
+                p.gateway_text(),
+                f.sso.port
             );
             theme::banner(ui, BannerKind::Warning, icon::HOURGLASS, |ui| {
                 ui.label(RichText::new(msg).color(t.text));
@@ -862,7 +946,7 @@ impl App {
             }
         }
         let p = &self.cfg.profiles[self.profile_connected];
-        let mut rows = vec![("Remote Gateway", gateway_text(p))];
+        let mut rows = vec![("Remote Gateway", p.gateway_text())];
         if !self.info.username.is_empty() {
             rows.push(("Username", self.info.username.clone()));
         }
@@ -884,7 +968,9 @@ impl App {
             };
             rows.push(("Routes", routes));
         }
-        rows.push(("Interface", p.network.ifname.to_string()));
+        if let Some(ifname) = &self.info.ifname {
+            rows.push(("Interface", ifname.to_string()));
+        }
         theme::card(ui, |ui| {
             theme::card_title(ui, "Details", None);
             ui.spacing_mut().interact_size.y = 0.0;
@@ -909,14 +995,22 @@ impl App {
     fn profile_editor(&mut self, ui: &mut Ui) {
         let i = self.cfg.selected;
         let (fix, scroll) = (self.fix_focus, std::mem::take(&mut self.fix_scroll));
-        let (drafts, p) = (&mut self.drafts, &mut self.cfg.profiles[i]);
-        connection_card(ui, drafts, p, self.keyring_warning.as_deref(), fix, scroll);
-        sign_in_card(ui, drafts, p, fix, scroll);
-        ui.horizontal(|ui| {
-            ui.add_space(2.0);
-            theme::eyebrow(ui, "Advanced");
-        });
-        advanced_cards(ui, drafts, p);
+        let drafts = &mut self.drafts;
+        let Profile { id, psk, vpn, .. } = &mut self.cfg.profiles[i];
+        let owner = DraftOwner::Profile(id.clone());
+        let keyring_warning = self.keyring_warning.as_deref();
+        match vpn {
+            Vpn::Azure(az) => azure_card(ui, az, psk.is_empty(), keyring_warning),
+            Vpn::FortiGate(f) => {
+                connection_card(ui, drafts, &owner, f, psk, keyring_warning, fix, scroll);
+                sign_in_card(ui, drafts, &owner, f, fix, scroll);
+                ui.horizontal(|ui| {
+                    ui.add_space(2.0);
+                    theme::eyebrow(ui, "Advanced");
+                });
+                advanced_cards(ui, drafts, &owner, f);
+            }
+        }
     }
 
     fn settings_page(&mut self, ui: &mut Ui) {
@@ -1004,6 +1098,214 @@ impl App {
     }
 }
 
+/// One connection type in the New Connection list: icon, name, protocol and sign-in, and "Not installed" when its
+/// VPN engine is missing.
+fn kind_row(ui: &mut Ui, kind: Kind, selected: bool, missing: bool) -> egui::Response {
+    let t = theme::tokens(ui);
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let inner = egui::Frame::new()
+        .inner_margin(Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                let icon = match kind {
+                    Kind::FortiGateIkev2 => icon::SHIELD,
+                    Kind::AzureOpenvpn => icon::CLOUD,
+                };
+                ui.label(theme::glyph(ui, icon, 18.0, t.secondary));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let line = |ui: &mut Ui, text: RichText| {
+                        ui.add(egui::Label::new(text).selectable(false).wrap());
+                    };
+                    line(ui, theme::title(ui, kind.name(), 14.0));
+                    line(ui, theme::weak(ui, kind.summary()));
+                    if missing {
+                        line(
+                            ui,
+                            RichText::new("Not installed")
+                                .size(theme::SMALL)
+                                .color(t.warning),
+                        );
+                    }
+                });
+            });
+        });
+    let r = ui.interact(
+        inner.response.rect,
+        ui.scope_id().with(("connection type", kind.name())),
+        Sense::click(),
+    );
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, kind.name()));
+    let fill = if selected {
+        t.selected
+    } else if r.hovered() {
+        t.hover
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter()
+        .set(bg, egui::Shape::rect_filled(r.rect, 8, fill));
+    if r.has_focus() {
+        ui.painter().rect_stroke(
+            r.rect,
+            8,
+            Stroke::new(2.0, t.focus),
+            egui::StrokeKind::Inside,
+        );
+    }
+    r
+}
+
+/// The note on a type whose VPN engine isn't installed: what's missing and how to install it.
+fn missing_note(ui: &mut Ui, missing: Option<&str>) {
+    let Some(d) = missing.and_then(Diag::parse) else {
+        return;
+    };
+    theme::banner(ui, BannerKind::Warning, icon::TRIANGLE_ALERT, |ui| {
+        let t = theme::tokens(ui);
+        ui.label(theme::title(ui, crate::diag::sentence(&d.headline), 14.0));
+        ui.add(
+            egui::Label::new(RichText::new(crate::diag::sentence(&d.help)).color(t.text)).wrap(),
+        );
+    });
+}
+
+/// A text field filling the column.
+fn line_edit(ui: &mut Ui, text: &mut String, hint: &str, label: &str) -> egui::Response {
+    let r = ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text(hint)
+            .margin(Margin::symmetric(10, 10))
+            .desired_width(f32::INFINITY),
+    );
+    theme::labelled(r, label)
+}
+
+/// What a New Connection form puts in the dialog's footer: its button, why it can't be clicked, and the connection
+/// it adds.
+struct Footer {
+    label: &'static str,
+    blocked: Option<String>,
+    profile: Option<Profile>,
+}
+
+/// New Connection, FortiGate: name and gateway; the rest is set in the editor afterwards.
+fn fortigate_form(ui: &mut Ui, nc: &mut NewConnection) -> Footer {
+    let t = theme::tokens(ui);
+    ui.add(
+        egui::Label::new(
+            RichText::new("IPsec (IKEv2) to a FortiGate. You sign in with single sign-on in your browser, or with a username and password.")
+                .color(t.secondary),
+        )
+        .wrap(),
+    );
+    let missing = nc.missing(Kind::FortiGateIkev2).map(str::to_owned);
+    missing_note(ui, missing.as_deref());
+    let name_error = nc.name.parse::<crate::net::ProfileName>().err();
+    form::column(ui, WIDE, Field::Name.label(), |ui| {
+        (
+            line_edit(ui, &mut nc.name, "", Field::Name.label()),
+            name_error.clone(),
+        )
+    });
+    let gateway_error = match nc.gateway.trim() {
+        "" => None,
+        g => g.parse::<crate::net::Host>().err(),
+    };
+    form::column_help(
+        ui,
+        WIDE,
+        Field::Gateway.label(),
+        "The FortiGate's address. You enter the pre-shared key and choose how to sign in next.",
+        |ui| {
+            (
+                line_edit(
+                    ui,
+                    &mut nc.gateway,
+                    "vpn.example.com",
+                    Field::Gateway.label(),
+                ),
+                gateway_error.clone(),
+            )
+        },
+    );
+    let blocked = nc
+        .blocked(Kind::FortiGateIkev2)
+        .or_else(|| (name_error.is_some() || gateway_error.is_some()).then(|| FIX_FIRST.into()));
+    Footer {
+        label: "Add Connection",
+        blocked,
+        profile: nc.fortigate().ok(),
+    }
+}
+
+/// New Connection, Azure VPN: the profile file from the Azure portal, and what it holds.
+fn azure_form(ui: &mut Ui, nc: &mut NewConnection) -> Footer {
+    let t = theme::tokens(ui);
+    ui.add(
+        egui::Label::new(
+            RichText::new("An Azure VPN gateway (Point-to-site, OpenVPN) where you sign in with Microsoft Entra ID. Import the profile your administrator or the Azure portal gives you.")
+                .color(t.secondary),
+        )
+        .wrap(),
+    );
+    let missing = nc.missing(Kind::AzureOpenvpn).map(str::to_owned);
+    missing_note(ui, missing.as_deref());
+    form::column_help(
+        ui,
+        WIDE,
+        "Azure VPN Profile",
+        "The zip from Download VPN client in the gateway's Point-to-site configuration in the Azure portal.",
+        |ui| {
+            let r = ui
+                .horizontal(|ui| {
+                    let r =
+                        theme::button(ui, nc.picking.is_none(), icon::FILE_INPUT, "Choose File…");
+                    if let Some(Ok(p)) = &nc.picked {
+                        ui.label(RichText::new(p.name.as_str()).monospace().color(t.text));
+                    }
+                    r
+                })
+                .inner;
+            if r.clicked() {
+                nc.pick(ui.ctx());
+            }
+            (r, None)
+        },
+    );
+    match &nc.picked {
+        Some(Ok(p)) => {
+            egui::Grid::new("azure-preview")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    for (k, v) in [
+                        ("Connection Name", p.name.to_string()),
+                        ("VPN Server", p.gateway_text()),
+                        ("Sign-in", p.sign_in().to_string()),
+                    ] {
+                        ui.label(RichText::new(k).color(t.weak));
+                        ui.add(egui::Label::new(RichText::new(v).color(t.text)).wrap());
+                        ui.end_row();
+                    }
+                });
+        }
+        Some(Err(e)) => {
+            theme::error_banner(ui, e, None, false);
+        }
+        None => {}
+    }
+    let blocked = nc.blocked(Kind::AzureOpenvpn).or_else(|| {
+        (!matches!(nc.picked, Some(Ok(_)))).then(|| "Choose the profile file first.".into())
+    });
+    Footer {
+        label: "Import Profile",
+        blocked,
+        profile: nc.picked.clone().and_then(Result::ok),
+    }
+}
+
 /// The width of one of two fields side by side.
 fn half(ui: &Ui) -> f32 {
     ((ui.available_width() - FIELD_GAP) / 2.0).max(160.0)
@@ -1039,15 +1341,17 @@ fn fix_column(
 }
 
 /// Gateway and PSK.
+#[allow(clippy::too_many_arguments)]
 fn connection_card(
     ui: &mut Ui,
     drafts: &mut Drafts,
-    p: &mut Profile,
+    owner: &DraftOwner,
+    p: &mut FortiGate,
+    psk: &mut String,
     keyring_warning: Option<&str>,
     fix: Option<Fix>,
     scroll: bool,
 ) {
-    let owner = DraftOwner::Profile(p.id.clone());
     let key = (owner.clone(), Field::Gateway);
     theme::card(ui, |ui| {
         theme::card_title(
@@ -1084,17 +1388,11 @@ fn connection_card(
                 w,
                 "Pre-shared Key",
                 PSK_HELP,
-                fix == Some(Fix::Psk) && p.psk.is_empty(),
+                fix == Some(Fix::Psk) && psk.is_empty(),
                 scroll,
                 |ui| {
                     (
-                        secret(
-                            ui,
-                            secret_id(&owner, "psk"),
-                            &mut p.psk,
-                            "Pre-shared Key",
-                            w,
-                        ),
+                        secret(ui, secret_id(owner, "psk"), psk, "Pre-shared Key", w),
                         None,
                     )
                 },
@@ -1110,9 +1408,71 @@ fn connection_card(
     });
 }
 
+/// An imported Azure VPN profile: what it connects to and how it signs in. Nothing to edit: importing the file again
+/// is how it changes.
+fn azure_card(
+    ui: &mut Ui,
+    az: &crate::azure::Azure,
+    no_secret: bool,
+    keyring_warning: Option<&str>,
+) {
+    let t = theme::tokens(ui);
+    theme::card(ui, |ui| {
+        theme::card_title(
+            ui,
+            "Azure VPN",
+            Some("Imported from the Azure VPN profile. Import it again to change these settings."),
+        );
+        ui.spacing_mut().interact_size.y = 0.0;
+        egui::Grid::new("azure")
+            .num_columns(2)
+            .spacing([28.0, 10.0])
+            .min_col_width(160.0)
+            .show(ui, |ui| {
+                for (k, v) in [
+                    ("VPN Server", az.gateway.to_string()),
+                    ("Tunnel Type", "OpenVPN over TCP".to_string()),
+                    ("Authentication Type", "Microsoft Entra ID".to_string()),
+                    ("Tenant", az.tenant.to_string()),
+                    ("Audience", az.audience.to_string()),
+                ] {
+                    ui.label(RichText::new(k).color(t.weak));
+                    ui.add(
+                        egui::Label::new(RichText::new(v).color(t.text))
+                            .selectable(true)
+                            .wrap(),
+                    );
+                    ui.end_row();
+                }
+                ui.label(RichText::new("Server Secret").color(t.weak));
+                if no_secret {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new("Missing. Import the profile again and click Save.")
+                                .color(t.warning),
+                        )
+                        .wrap(),
+                    );
+                } else {
+                    ui.label(RichText::new(PSK_HELP).color(t.text));
+                }
+                ui.end_row();
+            });
+        if let Some(w) = keyring_warning {
+            ui.label(RichText::new(w).monospace().color(t.warning));
+        }
+    });
+}
+
 /// SSO, or username and password.
-fn sign_in_card(ui: &mut Ui, drafts: &mut Drafts, p: &mut Profile, fix: Option<Fix>, scroll: bool) {
-    let owner = DraftOwner::Profile(p.id.clone());
+fn sign_in_card(
+    ui: &mut Ui,
+    drafts: &mut Drafts,
+    owner: &DraftOwner,
+    p: &mut FortiGate,
+    fix: Option<Fix>,
+    scroll: bool,
+) {
     let key = |f: Field| (owner.clone(), f);
     theme::card(ui, |ui| {
         theme::card_title(ui, "Sign-in", Some("How you log in to the VPN"));
@@ -1205,7 +1565,7 @@ fn sign_in_card(ui: &mut Ui, drafts: &mut Drafts, p: &mut Profile, fix: Option<F
                         (
                             secret(
                                 ui,
-                                secret_id(&owner, "password"),
+                                secret_id(owner, "password"),
                                 &mut p.auth.password,
                                 "Password",
                                 w,
@@ -1224,8 +1584,7 @@ fn sign_in_card(ui: &mut Ui, drafts: &mut Drafts, p: &mut Profile, fix: Option<F
 }
 
 /// VPN settings, Phase 1, Phase 2 and Network, folded.
-fn advanced_cards(ui: &mut Ui, drafts: &mut Drafts, p: &mut Profile) {
-    let owner = DraftOwner::Profile(p.id.clone());
+fn advanced_cards(ui: &mut Ui, drafts: &mut Drafts, owner: &DraftOwner, p: &mut FortiGate) {
     let key = |f: Field| (owner.clone(), f);
     let has =
         |drafts: &Drafts, fields: &[Field]| fields.iter().any(|f| drafts.error(&key(*f)).is_some());

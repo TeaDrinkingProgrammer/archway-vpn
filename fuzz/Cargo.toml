@@ -15,6 +15,8 @@ serde_json = "1"
 serde_vici = "0.1"
 vec1 = "1"
 libc = "0.2"
+toml = "1"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 # Its own workspace: the fuzz crate and its nightly-only dependencies stay out of the app's build.
 [workspace]
@@ -82,6 +84,20 @@ bench = false
 [[bin]]
 name = "net_types"
 path = "fuzz_targets/net_types.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "azure_profile"
+path = "fuzz_targets/azure_profile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "entra_answer"
+path = "fuzz_targets/entra_answer.rs"
 test = false
 doc = false
 bench = false

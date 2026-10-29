@@ -8,7 +8,7 @@
 //!   * progress is reported as `@@{json}` lines on stdout, other lines are log output.
 
 use crate::charon::{self, ConnParams};
-use crate::config::{Config, Profile, RouteMode, UserAuth};
+use crate::config::{Config, FortiGate, Profile, RouteMode, UserAuth, Vpn};
 use crate::net::{Ipv4Net, Secret};
 use crate::protocol::{BackendEvent, BackendRequest, ClientAuth, EapIdentity, Routes};
 use crate::tunnel::{Tunnel, TunnelOpts};
@@ -114,10 +114,11 @@ fn no_token() -> String {
     )
 }
 
-/// How profile `p` authenticates: SSO -> (UID, SAML token), EAP login -> (username, password), else PSK only.
+/// How FortiGate connection `p` authenticates: SSO -> (UID, SAML token), EAP login -> (username, password), else
+/// PSK only.
 pub fn client_auth(
     cfg: &Config,
-    p: &Profile,
+    p: &FortiGate,
     sso_token: Option<Secret>,
 ) -> Result<ClientAuth, String> {
     let missing = || {
@@ -141,11 +142,12 @@ pub fn client_auth(
     }
 }
 
-/// The backend request for profile `p`. The profile's types already guarantee valid values; this refuses what's
-/// missing.
+/// The backend request for FortiGate connection `p` with pre-shared key `psk`. The settings' types already guarantee
+/// valid values; this refuses what's missing.
 pub fn build_request(
     cfg: &Config,
-    p: &Profile,
+    psk: &str,
+    p: &FortiGate,
     auth: ClientAuth,
 ) -> Result<BackendRequest, String> {
     let proposals = |v: &[crate::net::Proposal], phase: &str| {
@@ -175,7 +177,7 @@ pub fn build_request(
             missing("a remote gateway", "it's the FortiGate's address", "enter it under Connection → Remote Gateway")
         })?,
         ike_port: p.ike.port,
-        psk: Secret::new(p.psk.clone()).map_err(|_| {
+        psk: Secret::new(psk.to_string()).map_err(|_| {
             missing(
                 "a pre-shared key",
                 "the FortiGate proves who it is with it, also when you sign in with SSO. Ask your administrator for it",
@@ -201,8 +203,8 @@ pub fn build_request(
 
 /// Everything that would make the connection fail after the SSO login and the password prompt: all settings, the
 /// PSK, and username + password without SSO. Only the SSO token can't be checked yet.
-fn preflight(cfg: &Config, p: &Profile) -> Result<(), String> {
-    build_request(cfg, p, ClientAuth::PskOnly)?;
+fn preflight(cfg: &Config, psk: &str, p: &FortiGate) -> Result<(), String> {
+    build_request(cfg, psk, p, ClientAuth::PskOnly)?;
     if !p.sso.enabled {
         client_auth(cfg, p, None)?;
     }
@@ -216,10 +218,25 @@ fn run(
     cancel: &Arc<AtomicBool>,
     send: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Result<(), String> {
+    match &p.vpn {
+        // OpenVPN 3 over D-Bus, as the user; none of the strongSwan path below
+        Vpn::Azure(az) => crate::azure::run(p, az, cancel, send),
+        Vpn::FortiGate(f) => run_fortigate(cfg, &p.psk, f, shared, cancel, send),
+    }
+}
+
+fn run_fortigate(
+    cfg: &Config,
+    psk: &str,
+    p: &FortiGate,
+    shared: &Arc<Mutex<Shared>>,
+    cancel: &Arc<AtomicBool>,
+    send: Arc<dyn Fn(Event) + Send + Sync>,
+) -> Result<(), String> {
     if charon::charon_binary().is_none() {
         return Err(charon::install_hint());
     }
-    preflight(cfg, p)?;
+    preflight(cfg, psk, p)?;
 
     // ---- 1. SAML, unprivileged, in-process (SSO profiles only) ----
     let sso_token = if p.sso.enabled {
@@ -233,7 +250,7 @@ fn run(
     let sso_token = sso_token
         .map(|t| Secret::new(t).map_err(|_| no_token()))
         .transpose()?;
-    let req = build_request(cfg, p, client_auth(cfg, p, sso_token)?)?;
+    let req = build_request(cfg, psk, p, client_auth(cfg, p, sso_token)?)?;
 
     // ---- 2. IKE + tunnel as root: pkexec <self> --backend ----
     run_backend(&req, shared, cancel, send)
@@ -242,7 +259,7 @@ fn run(
 /// SAML login; Err("") on user cancel.
 fn sso_login(
     cfg: &Config,
-    p: &Profile,
+    p: &FortiGate,
     cancel: &Arc<AtomicBool>,
     send: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Result<String, String> {
@@ -574,7 +591,7 @@ mod tests {
     fn profile() -> (Config, Profile) {
         let cfg = Config::default();
         let mut p = cfg.profiles[0].clone();
-        p.gateway = Some("vpn.example.com".parse().unwrap());
+        p.fg().gateway = Some("vpn.example.com".parse().unwrap());
         p.psk = "k".into();
         (cfg, p)
     }
@@ -583,8 +600,8 @@ mod tests {
     fn missing_value_help_names_the_fields_as_labelled() {
         use crate::diag::{Diag, Fix};
         let (cfg, mut p) = profile();
-        p.gateway = None;
-        let e = preflight(&cfg, &p).unwrap_err();
+        p.fg().gateway = None;
+        let e = preflight(&cfg, &p.psk, p.fortigate().unwrap()).unwrap_err();
         assert!(e.contains("help: enter it under Connection → Remote Gateway"));
         assert_eq!(
             Diag::parse(&e).and_then(|d| d.fix()),
@@ -593,7 +610,7 @@ mod tests {
         );
         let (cfg, mut p) = profile();
         p.psk.clear();
-        let e = preflight(&cfg, &p).unwrap_err();
+        let e = preflight(&cfg, &p.psk, p.fortigate().unwrap()).unwrap_err();
         assert!(
             e.contains("Ask your administrator for it")
                 && e.contains("help: enter it under Connection → Pre-shared Key"),
@@ -601,9 +618,10 @@ mod tests {
         );
         assert_eq!(Diag::parse(&e).and_then(|d| d.fix()), Some(Fix::Psk));
         let (cfg, mut p) = profile();
-        p.sso.enabled = false;
+        p.fg().sso.enabled = false;
         assert_eq!(
-            Diag::parse(&preflight(&cfg, &p).unwrap_err()).and_then(|d| d.fix()),
+            Diag::parse(&preflight(&cfg, &p.psk, p.fortigate().unwrap()).unwrap_err())
+                .and_then(|d| d.fix()),
             Some(Fix::Credentials)
         );
     }
@@ -615,7 +633,13 @@ mod tests {
     #[test]
     fn request_from_a_normal_profile() {
         let (cfg, p) = profile();
-        let r = build_request(&cfg, &p, client_auth(&cfg, &p, Some(token())).unwrap()).unwrap();
+        let r = build_request(
+            &cfg,
+            &p.psk,
+            p.fortigate().unwrap(),
+            client_auth(&cfg, p.fortigate().unwrap(), Some(token())).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             r.auth,
             ClientAuth::Eap {
@@ -634,29 +658,32 @@ mod tests {
     #[test]
     fn username_login_and_psk_only() {
         let (cfg, mut p) = profile();
-        p.sso.enabled = false;
+        p.fg().sso.enabled = false;
         assert!(
-            client_auth(&cfg, &p, None)
+            client_auth(&cfg, p.fortigate().unwrap(), None)
                 .unwrap_err()
                 .starts_with("error: can't connect without a username and password\n")
         );
-        p.auth.username = Some("jane".parse().unwrap());
+        p.fg().auth.username = Some("jane".parse().unwrap());
         assert!(
-            client_auth(&cfg, &p, None)
+            client_auth(&cfg, p.fortigate().unwrap(), None)
                 .unwrap_err()
                 .starts_with("error: can't connect without a username and password\n"),
             "no password"
         );
-        p.auth.password = "pw".into();
+        p.fg().auth.password = "pw".into();
         assert_eq!(
-            client_auth(&cfg, &p, None).unwrap(),
+            client_auth(&cfg, p.fortigate().unwrap(), None).unwrap(),
             ClientAuth::Eap {
                 identity: EapIdentity::User("jane".parse().unwrap()),
                 secret: Secret::new("pw".into()).unwrap()
             }
         );
-        p.auth.mode = UserAuth::None;
-        assert_eq!(client_auth(&cfg, &p, None).unwrap(), ClientAuth::PskOnly);
+        p.fg().auth.mode = UserAuth::None;
+        assert_eq!(
+            client_auth(&cfg, p.fortigate().unwrap(), None).unwrap(),
+            ClientAuth::PskOnly
+        );
     }
 
     #[test]
@@ -665,7 +692,7 @@ mod tests {
         let bad = |f: &dyn Fn(&mut Profile)| {
             let mut q = p.clone();
             f(&mut q);
-            build_request(&cfg, &q, ClientAuth::PskOnly).unwrap_err()
+            build_request(&cfg, &q.psk, q.fortigate().unwrap(), ClientAuth::PskOnly).unwrap_err()
         };
         // like the app's other errors: a headline, then what's wrong and what to do (see `diag`)
         let refused = |e: String, headline: &str| {
@@ -675,7 +702,7 @@ mod tests {
             )
         };
         refused(
-            bad(&|q| q.gateway = None),
+            bad(&|q| q.fg().gateway = None),
             "can't connect without a remote gateway",
         );
         refused(
@@ -683,20 +710,20 @@ mod tests {
             "can't connect without a pre-shared key",
         );
         refused(
-            bad(&|q| q.ike.proposals.clear()),
+            bad(&|q| q.fg().ike.proposals.clear()),
             "can't connect without a Phase 1 proposal",
         );
         refused(
-            bad(&|q| q.ike.dh_groups.clear()),
+            bad(&|q| q.fg().ike.dh_groups.clear()),
             "can't connect without a DH group",
         );
         refused(
-            bad(&|q| q.esp.proposals.clear()),
+            bad(&|q| q.fg().esp.proposals.clear()),
             "can't connect without a Phase 2 proposal",
         );
         let e = bad(&|q| {
-            q.network.route_mode = RouteMode::Custom;
-            q.network.custom_routes.clear();
+            q.fg().network.route_mode = RouteMode::Custom;
+            q.fg().network.custom_routes.clear();
         });
         refused(e, "can't connect without a network to route");
     }
@@ -704,17 +731,17 @@ mod tests {
     #[test]
     fn preflight_refuses_what_would_fail_after_the_sso_login() {
         let (cfg, mut p) = profile();
-        assert_eq!(preflight(&cfg, &p), Ok(()));
+        assert_eq!(preflight(&cfg, &p.psk, p.fortigate().unwrap()), Ok(()));
         p.psk.clear();
         assert!(
-            preflight(&cfg, &p)
+            preflight(&cfg, &p.psk, p.fortigate().unwrap())
                 .unwrap_err()
                 .starts_with("error: can't connect without a pre-shared key\n")
         );
         let (cfg, mut p) = profile();
-        p.sso.enabled = false;
+        p.fg().sso.enabled = false;
         assert!(
-            preflight(&cfg, &p)
+            preflight(&cfg, &p.psk, p.fortigate().unwrap())
                 .unwrap_err()
                 .starts_with("error: can't connect without a username and password\n")
         );
@@ -723,15 +750,19 @@ mod tests {
     #[test]
     fn routes_follow_the_routing_choice() {
         let (cfg, mut p) = profile();
-        p.network.route_mode = RouteMode::Full;
+        p.fg().network.route_mode = RouteMode::Full;
         assert_eq!(
-            build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes,
+            build_request(&cfg, &p.psk, p.fortigate().unwrap(), ClientAuth::PskOnly)
+                .unwrap()
+                .routes,
             Routes::Full
         );
-        p.network.route_mode = RouteMode::Custom;
-        p.network.custom_routes = vec!["10.0.0.0/8".parse().unwrap()];
+        p.fg().network.route_mode = RouteMode::Custom;
+        p.fg().network.custom_routes = vec!["10.0.0.0/8".parse().unwrap()];
         assert_eq!(
-            build_request(&cfg, &p, ClientAuth::PskOnly).unwrap().routes,
+            build_request(&cfg, &p.psk, p.fortigate().unwrap(), ClientAuth::PskOnly)
+                .unwrap()
+                .routes,
             Routes::Custom(vec1!["10.0.0.0/8".parse().unwrap()])
         );
     }

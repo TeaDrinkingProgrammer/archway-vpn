@@ -1,7 +1,7 @@
 //! PSK and password storage in the desktop keyring (freedesktop Secret Service).
 //! The settings files never hold secrets; without a Secret Service they only live in memory.
 
-use crate::config::{Config, Profile};
+use crate::config::{Config, Profile, Vpn};
 use crate::diag;
 use secret_service::blocking::{Collection, SecretService};
 use secret_service::{EncryptionType, Error};
@@ -80,24 +80,27 @@ impl std::fmt::Debug for Op {
 
 /// The secret as it belongs in the keyring: the password only when `save_password`.
 fn stored(p: &Profile, kind: Kind) -> &str {
-    match kind {
-        Kind::Psk => &p.psk,
-        Kind::Password if p.auth.save_password => &p.auth.password,
-        Kind::Password => "",
+    match (kind, &p.vpn) {
+        (Kind::Psk, _) => &p.psk,
+        (Kind::Password, Vpn::FortiGate(f)) if f.auth.save_password => &f.auth.password,
+        (Kind::Password, _) => "",
     }
 }
 
-fn field_ref(p: &Profile, kind: Kind) -> &String {
-    match kind {
-        Kind::Psk => &p.psk,
-        Kind::Password => &p.auth.password,
+/// The profile's field for `kind`; None: its type has no such secret (an Azure connection has no password).
+fn field_ref(p: &Profile, kind: Kind) -> Option<&String> {
+    match (kind, &p.vpn) {
+        (Kind::Psk, _) => Some(&p.psk),
+        (Kind::Password, Vpn::FortiGate(f)) => Some(&f.auth.password),
+        (Kind::Password, Vpn::Azure(_)) => None,
     }
 }
 
-fn field(p: &mut Profile, kind: Kind) -> &mut String {
-    match kind {
-        Kind::Psk => &mut p.psk,
-        Kind::Password => &mut p.auth.password,
+fn field(p: &mut Profile, kind: Kind) -> Option<&mut String> {
+    match (kind, &mut p.vpn) {
+        (Kind::Psk, _) => Some(&mut p.psk),
+        (Kind::Password, Vpn::FortiGate(f)) => Some(&mut f.auth.password),
+        (Kind::Password, Vpn::Azure(_)) => None,
     }
 }
 
@@ -176,9 +179,15 @@ pub fn apply(
                             if let Some(n) = next.profiles.iter_mut().find(|n| &n.id == profile_id)
                             {
                                 n.name = o.name.clone(); // a failed relabel is retried too
-                                *field(n, *kind) = field_ref(o, *kind).clone();
-                                if *kind == Kind::Password {
-                                    n.auth.save_password = o.auth.save_password;
+                                if let (Some(nf), Some(of)) = (field(n, *kind), field_ref(o, *kind))
+                                {
+                                    *nf = of.clone();
+                                }
+                                if let (Vpn::FortiGate(nf), Vpn::FortiGate(of)) =
+                                    (&mut n.vpn, &o.vpn)
+                                    && *kind == Kind::Password
+                                {
+                                    nf.auth.save_password = of.auth.save_password;
                                 }
                             }
                         }
@@ -216,14 +225,18 @@ pub fn fill(store: &dyn SecretStore, cfg: &mut Config) -> Vec<String> {
 /// `fill` for a single profile.
 pub fn fill_profile(store: &dyn SecretStore, p: &mut Profile) -> Vec<String> {
     let mut errors = Vec::new();
-    let kinds: &[Kind] = if p.auth.save_password {
+    let kinds: &[Kind] = if p.fortigate().is_some_and(|f| f.auth.save_password) {
         &[Kind::Psk, Kind::Password]
     } else {
         &[Kind::Psk]
     };
     for &kind in kinds {
         match store.get(&p.id, kind) {
-            Ok(Some(s)) => *field(p, kind) = s,
+            Ok(Some(s)) => {
+                if let Some(f) = field(p, kind) {
+                    *f = s;
+                }
+            }
             Ok(None) => {}
             Err(e) => errors.push(diag(
                 "error",
@@ -484,13 +497,13 @@ mod tests {
     fn password_only_stored_when_saved() {
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
-        cfg.profiles[0].auth.password = "pw".into();
+        cfg.profiles[0].fg().auth.password = "pw".into();
         assert_eq!(
             plan(&saved, &cfg),
             vec![],
             "save_password off: nothing to store"
         );
-        cfg.profiles[0].auth.save_password = true;
+        cfg.profiles[0].fg().auth.save_password = true;
         assert_eq!(
             plan(&saved, &cfg),
             vec![set_op(&cfg.profiles[0], Kind::Password, "pw")]
@@ -500,10 +513,10 @@ mod tests {
     #[test]
     fn untick_save_password_deletes() {
         let mut saved = cfg_with("Office");
-        saved.profiles[0].auth.password = "pw".into();
-        saved.profiles[0].auth.save_password = true;
+        saved.profiles[0].fg().auth.password = "pw".into();
+        saved.profiles[0].fg().auth.save_password = true;
         let mut cfg = saved.clone();
-        cfg.profiles[0].auth.save_password = false;
+        cfg.profiles[0].fg().auth.save_password = false;
         assert_eq!(
             plan(&saved, &cfg),
             vec![set_op(&cfg.profiles[0], Kind::Password, "")]
@@ -557,7 +570,7 @@ mod tests {
         let store = MemoryStore::default();
         let mut cfg = cfg_with("Office");
         cfg.profiles.push(Profile::default());
-        cfg.profiles[1].auth.save_password = true;
+        cfg.profiles[1].fg().auth.save_password = true;
         for p in &cfg.profiles {
             store.set(&p.id, Kind::Psk, "l", "k").unwrap();
             store.set(&p.id, Kind::Password, "l", "pw").unwrap();
@@ -566,14 +579,14 @@ mod tests {
         assert_eq!(
             (
                 cfg.profiles[0].psk.as_str(),
-                cfg.profiles[0].auth.password.as_str()
+                cfg.profiles[0].fortigate().unwrap().auth.password.as_str()
             ),
             ("k", "")
         );
         assert_eq!(
             (
                 cfg.profiles[1].psk.as_str(),
-                cfg.profiles[1].auth.password.as_str()
+                cfg.profiles[1].fortigate().unwrap().auth.password.as_str()
             ),
             ("k", "pw")
         );
@@ -762,11 +775,12 @@ mod tests {
         let saved = cfg_with("Office");
         let mut cfg = saved.clone();
         cfg.profiles[0].psk = "k".into();
-        cfg.profiles[0].auth.password = "pw".into();
-        cfg.profiles[0].auth.save_password = true;
+        cfg.profiles[0].fg().auth.password = "pw".into();
+        cfg.profiles[0].fg().auth.save_password = true;
         let (next, _) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
         assert_eq!(
-            next.profiles[0].auth.password, "pw",
+            next.profiles[0].fortigate().unwrap().auth.password,
+            "pw",
             "password write succeeded, so it counts as saved"
         );
         assert_eq!(
@@ -783,10 +797,10 @@ mod tests {
             ..Default::default()
         };
         let mut saved = cfg_with("Office");
-        saved.profiles[0].auth.password = "pw".into();
-        saved.profiles[0].auth.save_password = true;
+        saved.profiles[0].fg().auth.password = "pw".into();
+        saved.profiles[0].fg().auth.save_password = true;
         let mut cfg = saved.clone();
-        cfg.profiles[0].auth.save_password = false;
+        cfg.profiles[0].fg().auth.save_password = false;
         let (next, _) = apply(&store, &plan(&saved, &cfg), &saved, &cfg);
         assert!(!next.settings_eq(&cfg), "still unsaved");
         assert_eq!(

@@ -57,10 +57,17 @@ jobs:
       - name: cargo build
         run: cargo build --release --locked
       # contents and dependencies: [package.metadata.deb] and [package.metadata.generate-rpm] in Cargo.toml
+      # the app, then one package per VPN engine that only pulls the engine in (the variants)
       - name: cargo deb
-        run: cargo deb --no-build -o dist/
+        run: |
+          cargo deb --no-build -o dist/
+          cargo deb --no-build -o dist/ --variant ipsec
+          cargo deb --no-build -o dist/ --variant openvpn
       - name: cargo generate-rpm
-        run: cargo generate-rpm -o dist/
+        run: |
+          cargo generate-rpm -o dist/
+          cargo generate-rpm -o dist/ --variant ipsec
+          cargo generate-rpm -o dist/ --variant openvpn
       - name: Checksums
         run: cd dist && sha256sum -- * > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

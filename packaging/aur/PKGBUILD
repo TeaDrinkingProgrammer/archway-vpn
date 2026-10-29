@@ -5,15 +5,21 @@
 pkgname=archway-vpn
 pkgver=0.3.0
 pkgrel=1
-pkgdesc='FortiGate IPsec (IKEv2) VPN client with SAML single sign-on, on strongSwan'
+pkgdesc='FortiGate IPsec (IKEv2) and Azure VPN (Microsoft Entra ID) client with single sign-on'
 arch=('x86_64')
 url='https://github.com/TeaDrinkingProgrammer/archway-vpn'
 license=('MIT OR Apache-2.0')
-depends=('strongswan' 'polkit' 'wayland' 'libxkbcommon' 'libxkbcommon-x11' 'libx11' 'libxcb' 'libxcursor'
+depends=('wayland' 'libxkbcommon' 'libxkbcommon-x11' 'libx11' 'libxcb' 'libxcursor'
          'libxi' 'libxrender' 'libglvnd' 'xdg-utils' 'glibc' 'gcc-libs')
 makedepends=('cargo' 'git')
+# makepkg's default LTO (-flto=auto in CFLAGS) makes the C and assembly in ring compile to GCC LTO bytecode, which
+# rust-lld can't link (undefined ring_core_* symbols); the release profile in Cargo.toml does Rust's own LTO
+options=('!lto')
 optdepends=('mesa: OpenGL driver'
-            'org.freedesktop.secrets: stores connection passwords and PSKs')
+            'org.freedesktop.secrets: stores connection passwords and PSKs'
+            'strongswan: FortiGate connections'
+            'polkit: FortiGate connections (pkexec)'
+            'openvpn3: Azure VPN connections (AUR)')
 # A git source pinned to a tag. VCS sources take SKIP: there is no archive to hash, and git verifies the objects itself. A tag can be moved,
 # so for a stricter pin use #commit=<hash>. (A GitHub tag tarball would have a stable-looking sha256sum, but
 # GitHub does not promise its archives are byte-stable.)
