@@ -19,6 +19,7 @@ optdepends=('mesa: OpenGL driver'
             'org.freedesktop.secrets: stores connection passwords and PSKs'
             'strongswan: FortiGate connections'
             'polkit: FortiGate connections (pkexec)'
+            'iproute2: FortiGate connections (cleanup if Archway stops unexpectedly)'
             'openvpn3: Azure VPN connections (AUR)')
 # A git source pinned to a tag. VCS sources take SKIP: there is no archive to hash, and git verifies the objects itself. A tag can be moved,
 # so for a stricter pin use #commit=<hash>. (A GitHub tag tarball would have a stable-looking sha256sum, but
