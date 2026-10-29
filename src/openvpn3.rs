@@ -33,8 +33,8 @@ pub fn install_hint() -> String {
         "error",
         "OpenVPN 3 Linux isn't installed",
         "Azure VPN connections run on it",
-        "install the archway-vpn-openvpn package, or openvpn3-client. Debian 13 and newer ship it; on Fedora add the \
-         dsommers/openvpn3 Copr (https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/), on Ubuntu and Debian 12 \
+        "install the archway-vpn-openvpn package, or openvpn3-client. Debian 13 and Ubuntu 26.04 and newer ship it; on \
+         Fedora add the dsommers/openvpn3 Copr (https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/), on Ubuntu 24.04 and Debian 12 \
          OpenVPN's repository (https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux), on Arch the AUR package openvpn3",
     )
 }

@@ -18,7 +18,7 @@
    - It has `SHA256SUMS` and three `.deb` and three `.rpm` packages: `archway-vpn`, `archway-vpn-ipsec` and
      `archway-vpn-openvpn`.
    - The attestation verifies: `gh attestation verify archway-vpn_*.deb -R TeaDrinkingProgrammer/archway-vpn`.
-   - On Fedora and Ubuntu, the app with `archway-vpn-ipsec` installs and connects to a FortiGate, and with
+   - On Fedora, Debian and Ubuntu, the app with `archway-vpn-ipsec` installs and connects to a FortiGate, and with
      `archway-vpn-openvpn` (after adding OpenVPN's repository) to an Azure VPN gateway.
 <!-- AUR package not published yet
 7. Update the AUR package with the new `PKGBUILD` (and `.SRCINFO`: `makepkg --printsrcinfo > .SRCINFO`).

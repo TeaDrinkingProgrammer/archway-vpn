@@ -50,7 +50,7 @@ sudo dnf install ./archway-vpn-[0-9]*.rpm ./archway-vpn-ipsec-*.rpm       # Fedo
 sudo apt install ./archway-vpn_*.deb ./archway-vpn-ipsec_*.deb             # Debian, Ubuntu
 ```
 
-For Azure VPN connections, first add OpenVPN's repository for OpenVPN 3 Linux, which Fedora and Ubuntu don't ship: on Fedora the [dsommers/openvpn3 Copr](https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/) (`sudo dnf copr enable dsommers/openvpn3`), on Ubuntu and Debian 12 [OpenVPN's repository](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux). Debian 13 and newer ship it. Then:
+For Azure VPN connections, Debian 13 and Ubuntu 26.04 and newer ship OpenVPN 3 Linux. On Fedora, first add the [dsommers/openvpn3 Copr](https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/) (`sudo dnf copr enable dsommers/openvpn3`); on Ubuntu 24.04 and Debian 12, [OpenVPN's repository](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux). Then:
 
 ```bash
 sudo dnf install ./archway-vpn-[0-9]*.rpm ./archway-vpn-openvpn-*.rpm      # Fedora
