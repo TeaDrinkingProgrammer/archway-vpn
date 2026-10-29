@@ -1,7 +1,8 @@
 //! archway-vpn - FortiGate IPsec (IKEv2) + SAML SSO client for Linux, egui front-end.
 //! SAML is native Rust (saml.rs/tls.rs); IKEv2 and the XFRM SAs are done by a private strongSwan charon (charon.rs,
 //! vici.rs); the xfrm interface, routes and DNS are set up over netlink and D-Bus (tunnel.rs, netlink.rs, resolved.rs).
-//! The same binary is the privileged backend: `pkexec archway-vpn --backend` (see backend.rs).
+//! The same binary is the privileged backend: `pkexec archway-vpn --backend` (see backend.rs); systemd cleans up after
+//! it if it dies (systemd.rs).
 
 mod azure;
 mod backend;
@@ -19,6 +20,7 @@ mod privdrop;
 mod protocol;
 mod resolved;
 mod saml;
+mod systemd;
 mod theme;
 mod tls;
 mod tunnel;

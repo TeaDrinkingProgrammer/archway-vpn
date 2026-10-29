@@ -287,9 +287,9 @@ fn our_routes() -> Result<Vec<RouteMessage>, String> {
     Ok(out)
 }
 
-/// Remove leftovers of a session that died without cleanup: routes tagged `RT_PROTO` and the interface `name`.
-/// Returns the number of items removed.
-pub fn purge(name: &IfName) -> Result<usize, String> {
+/// Remove leftovers of a session that died without cleanup: routes tagged `RT_PROTO` and every xfrm interface bound
+/// to `IF_ID`, whatever its name. Returns the number of items removed.
+pub fn purge() -> Result<usize, String> {
     let mut n = 0;
     for r in our_routes()? {
         // a route can already be gone with its interface; that's fine
@@ -297,17 +297,26 @@ pub fn purge(name: &IfName) -> Result<usize, String> {
             n += 1;
         }
     }
-    if let Some(l) = get_link(name)? {
-        // never delete someone else's interface (a profile could name docker0 or wg0)
-        if !is_ours(&l) {
-            return Err(format!(
-                "interface {name} exists and isn't an Archway interface (xfrm, if_id {IF_ID:#x}); choose another interface name"
-            ));
+    let links: Vec<LinkMessage> =
+        with_handle(async |h| h.link().get().execute().try_collect().await)?;
+    for l in links.iter().filter(|l| is_ours(l)) {
+        // one that's gone since the dump is fine too; one in the way of this session `ensure_free` reports
+        if del_link(IfIndex::from_kernel(l.header.index)?).is_ok() {
+            n += 1;
         }
-        del_link(IfIndex::from_kernel(l.header.index)?)?;
-        n += 1;
     }
     Ok(n)
+}
+
+/// Refuse an interface name someone else already uses: we never delete or take over another program's interface (a
+/// profile could name docker0 or wg0). Run after `purge`, which removes our own.
+pub fn ensure_free(name: &IfName) -> Result<(), String> {
+    match get_link(name)? {
+        Some(_) => Err(format!(
+            "interface {name} exists and isn't an Archway interface (xfrm, if_id {IF_ID:#x}); choose another interface name"
+        )),
+        None => Ok(()),
+    }
 }
 
 /// A route someone else added (no `RT_PROTO` tag), for the kernel tests.
@@ -372,19 +381,30 @@ mod tests {
         assert_eq!(our_routes().unwrap().len(), 3);
         del_route("10.10.0.0/16".parse().unwrap()).unwrap();
         assert_eq!(our_routes().unwrap().len(), 2);
-        assert_eq!(purge(&ifn()).unwrap(), 3, "two IPv6 routes + the interface");
+        assert_eq!(purge().unwrap(), 3, "two IPv6 routes + the interface");
         assert_eq!(link_index(&ifn()).unwrap(), None);
         assert!(our_routes().unwrap().is_empty());
-        assert_eq!(purge(&ifn()).unwrap(), 0, "purge is idempotent");
+        assert_eq!(purge().unwrap(), 0, "purge is idempotent");
     }
 
     #[test]
     #[ignore]
-    fn purge_refuses_a_foreign_interface_with_our_name() {
+    fn purge_finds_our_interface_under_any_name() {
+        // the cleanup after a crash doesn't know which name the profile used
+        let n: IfName = "otherarch0".parse().unwrap();
+        add_xfrm_link(&n).unwrap();
+        assert_eq!(purge().unwrap(), 1);
+        assert_eq!(link_index(&n).unwrap(), None);
+    }
+
+    #[test]
+    #[ignore]
+    fn a_foreign_interface_with_our_name_is_refused_and_left_alone() {
         // e.g. a shared profile with ifname = "docker0": must not delete someone else's interface as root
         let n = ifn();
         add_dummy_for_tests(&n, Ipv4Addr::new(192, 0, 2, 10), 24).unwrap();
-        let e = purge(&n).unwrap_err();
+        assert_eq!(purge().unwrap(), 0, "only ours are purged");
+        let e = ensure_free(&n).unwrap_err();
         assert!(e.contains("isn't an Archway interface"), "{e}");
         assert!(link_index(&n).unwrap().is_some(), "left alone");
         assert!(add_xfrm_link(&n).is_err(), "and not taken over either");
@@ -406,11 +426,7 @@ mod tests {
         let (gw, oif) = route_to(Ipv4Addr::new(198, 51, 100, 7)).unwrap();
         assert_eq!((gw, oif), (Some(Ipv4Addr::new(192, 0, 2, 1)), ui));
         add_route_via("198.51.100.7/32".parse().unwrap(), gw, oif).unwrap();
-        assert_eq!(
-            purge(&"archwaynone0".parse().unwrap()).unwrap(),
-            2,
-            "our default + host route"
-        );
+        assert_eq!(purge().unwrap(), 2, "our default + host route");
         del_link(ui).unwrap();
     }
 }

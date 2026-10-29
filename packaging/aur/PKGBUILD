@@ -3,7 +3,7 @@
 # Source build for the AUR.
 # Per release: set pkgver to the release tag without its v (tag v0.2.0 -> pkgver=0.2.0), reset pkgrel to 1.
 pkgname=archway-vpn
-pkgver=0.4.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc='FortiGate IPsec (IKEv2) and Azure VPN (Microsoft Entra ID) client with single sign-on'
 arch=('x86_64')
@@ -19,6 +19,7 @@ optdepends=('mesa: OpenGL driver'
             'org.freedesktop.secrets: stores connection passwords and PSKs'
             'strongswan: FortiGate connections'
             'polkit: FortiGate connections (pkexec)'
+            'iproute2: FortiGate connections (cleanup if Archway stops unexpectedly)'
             'openvpn3: Azure VPN connections (AUR)')
 # A git source pinned to a tag. VCS sources take SKIP: there is no archive to hash, and git verifies the objects itself. A tag can be moved,
 # so for a stricter pin use #commit=<hash>. (A GitHub tag tarball would have a stable-looking sha256sum, but
