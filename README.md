@@ -59,7 +59,7 @@ sudo apt install ./archway-vpn_*.deb ./archway-vpn-openvpn_*.deb           # Deb
 
 If you use both kinds of connection, install both engine packages. Archway tells you when an engine is missing.
 
-On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`, and install `strongswan` and `polkit` for FortiGate, or the `openvpn3` AUR package for Azure VPN. To build from source, see [Build and run](#build-and-run).
+On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`, and install `strongswan` and `polkit` for FortiGate, or the `openvpn3` AUR package for Azure VPN (it needs `gdbuspp` from the AUR too; an AUR helper such as `yay` installs both). To build from source, see [Build and run](#build-and-run).
 
 ## Usage
 
