@@ -12,6 +12,9 @@ license=('MIT OR Apache-2.0')
 depends=('wayland' 'libxkbcommon' 'libxkbcommon-x11' 'libx11' 'libxcb' 'libxcursor'
          'libxi' 'libxrender' 'libglvnd' 'xdg-utils' 'glibc' 'gcc-libs')
 makedepends=('cargo' 'git')
+# makepkg's default LTO (-flto=auto in CFLAGS) makes the C and assembly in ring compile to GCC LTO bytecode, which
+# rust-lld can't link (undefined ring_core_* symbols); the release profile in Cargo.toml does Rust's own LTO
+options=('!lto')
 optdepends=('mesa: OpenGL driver'
             'org.freedesktop.secrets: stores connection passwords and PSKs'
             'strongswan: FortiGate connections'
