@@ -1,0 +1,5 @@
+GET /?code=0.AXkA1234&state=abcdefgh HTTP/1.1
+Host: localhost:2023
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+

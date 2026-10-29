@@ -1,3 +1,7 @@
 [default.extend-words]
 # netlink: output interface (RTA_OIF)
 oif = "oif"
+
+[files]
+# fuzz seeds are machine input (base64, binary), not text
+extend-exclude = ["fuzz/corpus/", "fuzz/regressions/"]

@@ -1,0 +1,8 @@
+type = "azure-openvpn"
+gateway = "vpn.example.com"
+tenant = "https://login.microsoftonline.com/99999999-8888-7777-6666-555555555555/"
+audience = "c632b3df-fb67-4d84-bdcf-b95ad541b5c8"
+root = "DF3C24F9BFD666761B268073FE06D1CC8D4F82A4"
+
+[sso]
+port = 10443
