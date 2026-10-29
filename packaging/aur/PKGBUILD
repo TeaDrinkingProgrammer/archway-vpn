@@ -5,7 +5,7 @@
 pkgname=archway-vpn
 pkgver=0.3.0
 pkgrel=1
-pkgdesc='FortiGate IPsec (IKEv2) VPN client with SAML single sign-on, on strongSwan'
+pkgdesc='FortiGate IPsec (IKEv2) and Azure VPN (Microsoft Entra ID) client with single sign-on'
 arch=('x86_64')
 url='https://github.com/TeaDrinkingProgrammer/archway-vpn'
 license=('MIT OR Apache-2.0')
