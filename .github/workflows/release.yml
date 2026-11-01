@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       # no rust-cache: a release builds from a clean slate, so a poisoned cache can't end up in the packages
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deb@3.8.0,cargo-generate-rpm@0.21.0
       - name: cargo build
