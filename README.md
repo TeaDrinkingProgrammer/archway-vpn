@@ -73,11 +73,15 @@ On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`, and inst
 
 1. Click **New Connection**, choose **FortiGate**, enter a name and the **Remote Gateway** (the FortiGate's address, for example `vpn.example.com`), and click **Add Connection**. Then fill in the Connection card:
    - **Pre-shared Key:** the phase 1 PSK. You need it even with SSO, because the gateway uses it to prove who it is.
+
+   ![The New Connection dialog with FortiGate and Azure VPN to choose from](docs/new-connection.png)
 2. Under **Sign-in**:
    - With SSO, turn on *Enable Single Sign On (SSO) for VPN Tunnel* and set **SSO Port** to the FortiGate's `auth-ike-saml-port`, for example 10443.
    - Without SSO, choose *Username and password (EAP)* or *None (pre-shared key only)*.
 3. If your FortiGate or EMS profile needs it, adjust **VPN Settings**, **Phase 1**, **Phase 2** and **Network**. The defaults are FortiClient's: AES128-SHA1 and AES256-SHA256 with DH group 20.
 4. Click **Connect**. With SSO your browser opens; log in there. Then the system asks for your password. Once the tunnel is up, the status shows **Connected**.
+
+   ![A connected FortiGate connection with its IP address, traffic and routes](docs/connected.png)
 5. Click **Disconnect** to close the tunnel. Closing the window disconnects too.
 
 ### Azure VPN (Microsoft Entra ID)
