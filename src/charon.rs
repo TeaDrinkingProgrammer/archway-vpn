@@ -802,6 +802,11 @@ mod tests {
         let mark = format!("ARCHWAY_TEST_MARK={}", std::process::id());
         let (k, v) = mark.split_once('=').unwrap();
         let mut c = Command::new("sleep").arg("30").env(k, v).spawn().unwrap();
+        // spawn returns mid-exec, before the kernel has filled in /proc/<pid>/environ
+        let t0 = Instant::now();
+        while pids_with_env(&mark).is_empty() && t0.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(pids_with_env(&mark), [c.id() as i32]);
         let _ = c.kill();
         let _ = c.wait();

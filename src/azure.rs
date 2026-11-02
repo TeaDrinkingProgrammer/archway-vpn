@@ -51,16 +51,16 @@ fn elements(xml: &str) -> Result<HashMap<String, String>, String> {
     loop {
         match r.read_event().map_err(|e| e.to_string())? {
             X::Start(e) => {
-                path.push(String::from_utf8_lossy(e.local_name().as_ref()).into());
+                path.push(e.local_name().into_inner().to_owned());
                 text.clear();
             }
-            X::Text(t) => text.push_str(&t.decode().map_err(|e| e.to_string())?),
-            X::CData(t) => text.push_str(&t.decode().map_err(|e| e.to_string())?),
+            X::Text(t) => text.push_str(&t),
+            X::CData(t) => text.push_str(&t),
             X::GeneralRef(e) => match e.resolve_char_ref().map_err(|e| e.to_string())? {
                 Some(c) => text.push(c),
                 None => {
-                    let name = e.decode().map_err(|e| e.to_string())?;
-                    let value = quick_xml::escape::resolve_predefined_entity(&name)
+                    let name: &str = &e;
+                    let value = quick_xml::escape::resolve_predefined_entity(name)
                         .ok_or_else(|| format!("unknown entity &{name};"))?;
                     text.push_str(value);
                 }
