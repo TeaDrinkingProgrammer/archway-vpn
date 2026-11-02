@@ -2,20 +2,28 @@
 
 Connect to your FortiGate IPsec (IKEv2) VPN with single sign-on on Linux, which Fortinet's own FortiClient can't do. Archway also connects to Azure VPN gateways that sign you in with Microsoft Entra ID, which has no supported Linux client since Microsoft retired its Azure VPN Client for Linux.
 
-Archway is a desktop frontend for existing VPN engines. FortiGate connections run on [strongSwan](https://www.strongswan.org/), the open-source IPsec implementation, which handles the key exchange, encryption and tunnel; Archway adds the FortiGate SSO login and sets up routes and DNS. Azure VPN connections run on [OpenVPN® 3 Linux](https://github.com/OpenVPN/openvpn3-linux); Archway adds the Entra sign-in and the connection settings from the Azure profile.
+Archway is a desktop frontend for existing VPN engines. FortiGate connections run on [strongSwan](https://www.strongswan.org/), the open-source IPsec implementation, which handles the key exchange, encryption and tunnel; Archway adds the FortiGate SSO login and sets up routes and DNS. Azure VPN connections run on [OpenVPN® 3 Linux](https://codeberg.org/OpenVPN/openvpn3-linux); Archway adds the Entra sign-in and the connection settings from the Azure profile.
 
 > [!WARNING]
 > Archway is in a very early stage. Expect bugs and rough edges. If something breaks, please open an issue with the log (turn on verbose logging in Settings first).
 >
 > Archway is a side project. Its main use is connecting to company networks. If you rely on a VPN to keep your traffic private or secure, please use another solution.
 
+## How Archway is built
+
+Archway's code is written by an AI coding assistant. I designed the architecture and directed the work, though I wrote none of the code. If you have problems with that, I understand: feel free to skip over this project.
+
+That being said, I did try to architect the application in a secure way. The most sensitive part, the encrypted tunnel itself (key exchange, encryption, rekeying), is handed over to strongSwan or OpenVPN® 3 Linux. Archway handles the vendor-specific sign-in and the settings around it. Requests to its root backend are typed and checked before anything runs, the backend runs no shell or external commands, and every parser that reads outside input is fuzzed. See [Configuration and security](#configuration-and-security) for details.
+
+Nobody has audited the code. If you find a security problem, see [SECURITY.md](SECURITY.md).
+
 ![Archway main window](docs/screenshot.png)
 
 ## Features
 
-- **Azure VPN with Microsoft Entra ID.** Import the profile the Azure portal gives you and sign in through your browser. Archway runs these connections on OpenVPN 3 Linux.
+- **Azure VPN with Microsoft Entra ID.** Import the profile the Azure portal gives you and sign in through your browser. Archway runs these connections on OpenVPN® 3 Linux.
 - **FortiGate IPsec (IKEv2) with single sign-on.** Sign in through your own browser, with your organisation's usual login page, password manager and MFA, which Fortinet's FortiClient for Linux can't do. Classic username and password logins and pre-shared-key-only setups work too. Archway runs these connections on strongSwan.
-- **Built on established VPN engines.** The tunnel itself is handled by open-source VPN software with a long track record: [strongSwan](https://www.strongswan.org/) for FortiGate connections and [OpenVPN 3 Linux](https://github.com/OpenVPN/openvpn3-linux) for Azure VPN. Archway adds the sign-in and the settings.
+- **Built on established VPN engines.** The tunnel itself is handled by open-source VPN software with a long track record: [strongSwan](https://www.strongswan.org/) for FortiGate connections and [OpenVPN® 3 Linux](https://codeberg.org/OpenVPN/openvpn3-linux) for Azure VPN. Archway adds the sign-in and the settings.
 - **Flexible routing.** Send only your company's networks through the VPN, route all traffic through it, or pick the networks yourself.
 - **Leak protection.** Archway uses the VPN's DNS so internal servers resolve by name, and in full-tunnel mode it blocks IPv6 so nothing bypasses the VPN.
 - **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. Most defaults match FortiClient's too; certificate verification on the SSO port is on by default.
@@ -41,7 +49,7 @@ Download the packages from the [latest release](../../releases/latest): the app,
 | Your connections | Engine | Package |
 |---|---|---|
 | FortiGate | strongSwan (IPsec IKEv2) and pkexec | `archway-vpn-ipsec` |
-| Azure VPN | OpenVPN 3 Linux | `archway-vpn-openvpn` |
+| Azure VPN | OpenVPN® 3 Linux | `archway-vpn-openvpn` |
 
 For FortiGate connections:
 
@@ -50,7 +58,7 @@ sudo dnf install ./archway-vpn-[0-9]*.rpm ./archway-vpn-ipsec-*.rpm       # Fedo
 sudo apt install ./archway-vpn_*.deb ./archway-vpn-ipsec_*.deb             # Debian, Ubuntu
 ```
 
-For Azure VPN connections, Debian 13 and Ubuntu 26.04 and newer ship OpenVPN 3 Linux. On Fedora, first add the [dsommers/openvpn3 Copr](https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/) (`sudo dnf copr enable dsommers/openvpn3`); on Ubuntu 24.04 and Debian 12, [OpenVPN's repository](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux). Then:
+For Azure VPN connections, Debian 13 and Ubuntu 26.04 and newer ship OpenVPN® 3 Linux. On Fedora, first add the [dsommers/openvpn3 Copr](https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/) (`sudo dnf copr enable dsommers/openvpn3`); on Ubuntu 24.04 and Debian 12, [OpenVPN's repository](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux). Then:
 
 ```bash
 sudo dnf install ./archway-vpn-[0-9]*.rpm ./archway-vpn-openvpn-*.rpm      # Fedora
@@ -65,11 +73,15 @@ On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`, and inst
 
 1. Click **New Connection**, choose **FortiGate**, enter a name and the **Remote Gateway** (the FortiGate's address, for example `vpn.example.com`), and click **Add Connection**. Then fill in the Connection card:
    - **Pre-shared Key:** the phase 1 PSK. You need it even with SSO, because the gateway uses it to prove who it is.
+
+   ![The New Connection dialog with FortiGate and Azure VPN to choose from](docs/new-connection.png)
 2. Under **Sign-in**:
    - With SSO, turn on *Enable Single Sign On (SSO) for VPN Tunnel* and set **SSO Port** to the FortiGate's `auth-ike-saml-port`, for example 10443.
    - Without SSO, choose *Username and password (EAP)* or *None (pre-shared key only)*.
 3. If your FortiGate or EMS profile needs it, adjust **VPN Settings**, **Phase 1**, **Phase 2** and **Network**. The defaults are FortiClient's: AES128-SHA1 and AES256-SHA256 with DH group 20.
 4. Click **Connect**. With SSO your browser opens; log in there. Then the system asks for your password. Once the tunnel is up, the status shows **Connected**.
+
+   ![A connected FortiGate connection with its IP address, traffic and routes](docs/connected.png)
 5. Click **Disconnect** to close the tunnel. Closing the window disconnects too.
 
 ### Azure VPN (Microsoft Entra ID)
@@ -78,7 +90,7 @@ This works for Azure VPN gateways with Point-to-Site set to the OpenVPN tunnel t
 
 1. In the Azure portal, open the gateway's **Point-to-site configuration** and click **Download VPN client**, or ask your administrator for that zip file.
 2. Click **New Connection**, choose **Azure VPN**, click **Choose File…** and pick the zip. Archway reads the profile in its `AzureVPN` folder; the `azurevpnconfig.xml` from there on its own works too. Check what it shows and click **Import Profile**. Then click **Save**, which puts the server secret in your keyring.
-3. Click **Connect** and sign in with your Microsoft account in the browser. OpenVPN 3 Linux sets up the tunnel, so the system doesn't ask for your password.
+3. Click **Connect** and sign in with your Microsoft account in the browser. OpenVPN® 3 Linux sets up the tunnel, so the system doesn't ask for your password.
 
 Routes come from the gateway. DNS servers are used only if the gateway sends them. If the connection drops, Archway disconnects and you connect again, because the sign-in token can't be reused. If Archway is killed while connected, the tunnel stays up: `openvpn3 sessions-list` shows it and `openvpn3 session-manage --disconnect --path <path>` ends it.
 
@@ -121,7 +133,7 @@ as defined in the Apache-2.0 license, shall be dual licensed as above, without a
 |---|---|
 | OS | Linux with XFRM interface support (kernel ≥ 4.19) |
 | FortiGate connections | strongSwan: `charon-systemd` with the EAP plugins (packages in [Install](#install)). The app runs its own private instance; the system `strongswan` service doesn't need to run. libreswan can't be used because it has no EAP-MSCHAPv2. Also systemd, `ip` (iproute2), `pkexec` (polkit) with a desktop polkit agent, and a `resolvconf` implementation for VPN DNS. |
-| Azure VPN connections | OpenVPN 3 Linux (`openvpn3-client`, see [Install](#install)) |
+| Azure VPN connections | OpenVPN® 3 Linux (`openvpn3-client`, see [Install](#install)) |
 | Runtime tools | `xdg-open`, and `xdg-desktop-portal` for the file dialog |
 | Keyring (optional) | a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) to remember the PSK and password; without one they're kept in memory until the app closes |
 | Build | Rust ≥ 1.95, `cargo` |
@@ -154,7 +166,7 @@ Each connection has a type: the gateway it talks to, the tunnel protocol, and wi
 | Type | Gateway and protocol | Sign-in | Engine | Code |
 |---|---|---|---|---|
 | FortiGate | FortiGate, IPsec IKEv2 | SAML SSO, username and password, or pre-shared key only | strongSwan, through the root backend | `backend.rs`, `charon.rs`, `saml.rs` |
-| Azure VPN | Azure VPN Gateway, OpenVPN over TCP | Microsoft Entra ID | OpenVPN 3 Linux, over D-Bus as your user | `azure.rs`, `entra.rs`, `openvpn3.rs` |
+| Azure VPN | Azure VPN Gateway, OpenVPN over TCP | Microsoft Entra ID | OpenVPN® 3 Linux, over D-Bus as your user | `azure.rs`, `entra.rs`, `openvpn3.rs` |
 
 The sign-in method is a setting within a type: a FortiGate connection switches between SSO, username and password, and pre-shared key only in its editor.
 
@@ -172,7 +184,7 @@ root = "<SHA-1 of the root certificate>"
 
 A file with a `type` Archway doesn't know is reported at startup and left alone, like any other file it can't read.
 
-Each engine has its own package that only pulls the engine in: `archway-vpn-ipsec` (strongSwan) and `archway-vpn-openvpn` (OpenVPN 3 Linux). The packages are named after the engine, not the vendor, so a later type that runs on an engine Archway already uses (Azure VPN over IKEv2 on strongSwan, say) needs no new package. The app checks for the engine before it creates or connects a connection of that type.
+Each engine has its own package that only pulls the engine in: `archway-vpn-ipsec` (strongSwan) and `archway-vpn-openvpn` (OpenVPN® 3 Linux). The packages are named after the engine, not the vendor, so a later type that runs on an engine Archway already uses (Azure VPN over IKEv2 on strongSwan, say) needs no new package. The app checks for the engine before it creates or connects a connection of that type.
 
 To add a type:
 
@@ -232,7 +244,7 @@ flowchart LR
         gui["GUI"]
     end
     browser["Browser"]
-    subgraph ov3["OpenVPN 3 Linux (system services)"]
+    subgraph ov3["OpenVPN® 3 Linux (system services)"]
         sess["Session manager<br/>and backend"]
         netcfg["netcfg<br/>tun, routes, DNS"]
     end
@@ -255,15 +267,15 @@ flowchart LR
 2. You sign in through the browser.
 3. Microsoft redirects the browser to a local callback on `localhost:2023`, carrying a one-time code.
 4. The GUI trades the code for an access token at the tenant's token endpoint.
-5. The GUI imports the OpenVPN config into OpenVPN 3 over the system D-Bus and hands over your account name as the username and the access token as the password.
-6. OpenVPN 3 connects to the gateway: TLS with the tls-auth key from the profile, the gateway checks the token.
-7. OpenVPN 3's own netcfg service creates the tun device and sets up the routes, and DNS if the gateway sends servers.
+5. The GUI imports the OpenVPN config into OpenVPN® 3 over the system D-Bus and hands over your account name as the username and the access token as the password.
+6. OpenVPN® 3 connects to the gateway: TLS with the tls-auth key from the profile, the gateway checks the token.
+7. OpenVPN® 3's own netcfg service creates the tun device and sets up the routes, and DNS if the gateway sends servers.
 
-The GUI polls the session's status over D-Bus. OpenVPN 3's services do the privileged work under their own D-Bus policy, so Archway asks for no password and runs as your user throughout.
+The GUI polls the session's status over D-Bus. OpenVPN® 3's services do the privileged work under their own D-Bus policy, so Archway asks for no password and runs as your user throughout.
 
-- Stock OpenVPN 2.x can't carry the token: its control channel limits the password to about 2 kB, and an Entra access token is longer. OpenVPN 3 has no such limit.
+- Stock OpenVPN® 2.x can't carry the token: its control channel limits the password to about 2 kB, and an Entra access token is longer. OpenVPN® 3 has no such limit.
 - The gateway's certificate is issued to `<vnet-id>.vpn.azure.com`, not to the name you dial, so that's the name Archway checks (`verify-x509-name`). The full chain and the server-auth key usage are checked too.
-- The gateway sends no keepalive pings, so the config sets `ping-restart 0`. With OpenVPN 3's default, every idle tunnel was dropped after 40 seconds.
+- The gateway sends no keepalive pings, so the config sets `ping-restart 0`. With OpenVPN® 3's default, every idle tunnel was dropped after 40 seconds.
 
 #### Source layout
 
@@ -291,7 +303,7 @@ The GUI polls the session's status over D-Bus. OpenVPN 3's services do the privi
 | `src/tls.rs` | rustls HTTPS client with system CAs and AIA intermediate fetching |
 | `src/azure.rs` | Azure VPN: profile import, OpenVPN config, connect sequence |
 | `src/entra.rs` | Microsoft Entra ID sign-in (authorization code with PKCE) |
-| `src/openvpn3.rs` | OpenVPN 3 Linux client over D-Bus |
+| `src/openvpn3.rs` | OpenVPN® 3 Linux client over D-Bus |
 
 ### Configuration and security
 
@@ -306,7 +318,7 @@ The GUI polls the session's status over D-Bus. OpenVPN 3's services do the privi
 - The PSK and a saved password are not in these files. They're in your desktop keyring through the freedesktop Secret Service, as items labelled `Archway VPN: <connection> (PSK)` / `(password)`. Without a Secret Service they're kept in memory until the app closes.
 - A password is stored only if *Save password* is ticked; otherwise it stays in memory until the app closes.
 - The SSO token is single-use and never written to disk.
-- Azure VPN: the server secret (the OpenVPN tls-auth key) is in the keyring, as an item labelled `(PSK)`. The access token stays in memory and reaches OpenVPN 3 only over D-Bus. Archway imports the OpenVPN config as single-use and not persistent, so OpenVPN 3 doesn't write it (and the key in it) to disk. The log shows the token's length, never the token.
+- Azure VPN: the server secret (the OpenVPN tls-auth key) is in the keyring, as an item labelled `(PSK)`. The access token stays in memory and reaches OpenVPN® 3 only over D-Bus. Archway imports the OpenVPN config as single-use and not persistent, so OpenVPN® 3 doesn't write it (and the key in it) to disk. The log shows the token's length, never the token.
 - Azure VPN: the gateway's root certificate is the one in your distribution's trusted certificates whose SHA-1 fingerprint matches the profile. Archway ships no certificate, and doesn't use the copy of the root certificate in the Azure portal's zip (`Generic/VpnServerRoot.cer_0`): the distribution keeps its store up to date, and taking roots from one place, checked against the profile's fingerprint, leaves less to get wrong. The sign-in only goes to Microsoft's own sign-in hosts (`login.microsoftonline.com`, `login.microsoftonline.us`, `login.chinacloudapi.cn`), so a profile can't send your code to another site. The browser's callback must carry the random `state` Archway sent, and the code is useless without the PKCE verifier that never leaves the app.
 - The browser hands the SSO token to a listener on `127.0.0.1`. The FortiGate builds that callback URL, so it can't carry a secret of Archway's, and the listener can't fully prove the request is your login's. It refuses requests from other users' processes and requests a web page sends itself (scripts, forms, images, frames). A forged callback could still sign you in with someone else's account, so Archway shows which account you signed in with, and warns when it differs from the connection's previous login. The accounts are kept in `~/.local/state/archway-vpn/sso-users.json`.
 - TLS on the SSO port:

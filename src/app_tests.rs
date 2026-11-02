@@ -1758,7 +1758,7 @@ fn new_connection_lists_the_types_and_blocks_one_whose_engine_is_missing() {
         ..Profile::new(Vpn::Azure(az))
     }));
     let (nodes, _) = app_frame(&ctx, &mut app, vec![]);
-    assert!(label_shown(&nodes, "OpenVPN 3 Linux isn't installed."));
+    assert!(label_shown(&nodes, "OpenVPN® 3 Linux isn't installed."));
     assert!(button(&nodes, "Import Profile").unwrap().is_disabled());
     let n = app.cfg.profiles.len();
     app_frame(&ctx, &mut app, vec![click_event(&nodes, "Import Profile")]);

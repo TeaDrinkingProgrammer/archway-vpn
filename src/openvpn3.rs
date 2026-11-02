@@ -31,7 +31,7 @@ const CREDENTIALS: (u32, u32) = (1, 1);
 pub fn install_hint() -> String {
     crate::diag(
         "error",
-        "OpenVPN 3 Linux isn't installed",
+        "OpenVPN® 3 Linux isn't installed",
         "Azure VPN connections run on it",
         "install the archway-vpn-openvpn package, or openvpn3-client. Debian 13 and Ubuntu 26.04 and newer ship it; on \
          Fedora add the dsommers/openvpn3 Copr (https://copr.fedorainfracloud.org/coprs/dsommers/openvpn3/), on Ubuntu 24.04 and Debian 12 \
@@ -67,7 +67,7 @@ impl OpenVpn3 {
                 "error",
                 "the system D-Bus can't be reached",
                 &e.to_string(),
-                "Azure VPN connections need it to talk to OpenVPN 3 Linux; restart your session and try again",
+                "Azure VPN connections need it to talk to OpenVPN® 3 Linux; restart your session and try again",
             )
         })?;
         let names: Vec<String> = call(
@@ -151,7 +151,7 @@ impl OpenVpn3 {
                     ));
                 }
                 (CONNECTION, FAILED | DISCONNECTED | DONE) => {
-                    return Err(connect_error(&format!("OpenVPN 3 reported: {msg}")));
+                    return Err(connect_error(&format!("OpenVPN® 3 reported: {msg}")));
                 }
                 _ if Instant::now() > deadline => {
                     return Err(connect_error("No connection after 90 seconds."));
@@ -276,7 +276,7 @@ impl Session<'_> {
                 Ok(_) => {}
                 Err(e) => {
                     log(format!("OpenVPN 3: {e}"));
-                    return "the OpenVPN 3 session ended";
+                    return "the OpenVPN® 3 session ended";
                 }
             }
             std::thread::sleep(Duration::from_secs(1));
