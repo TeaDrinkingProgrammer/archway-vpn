@@ -9,6 +9,14 @@ Archway is a desktop frontend for existing VPN engines. FortiGate connections ru
 >
 > Archway is a side project. Its main use is connecting to company networks. If you rely on a VPN to keep your traffic private or secure, please use another solution.
 
+## How Archway is built
+
+Archway's code is written by an AI coding assistant. I designed the architecture and directed the work, though I wrote none of the code. If you have problems with that, I understand: feel free to skip over this project.
+
+That being said, I did try to architect the application in a secure way. The most sensitive part, the encrypted tunnel itself (key exchange, encryption, rekeying), is handed over to strongSwan or OpenVPN® 3 Linux. Archway handles the vendor-specific sign-in and the settings around it. Requests to its root backend are typed and checked before anything runs, the backend runs no shell or external commands, and every parser that reads outside input is fuzzed. See [Configuration and security](#configuration-and-security) for details.
+
+Nobody has audited the code. If you find a security problem, see [SECURITY.md](SECURITY.md).
+
 ![Archway main window](docs/screenshot.png)
 
 ## Features
