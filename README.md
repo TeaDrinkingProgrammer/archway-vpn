@@ -2,7 +2,7 @@
 
 Connect to your FortiGate IPsec (IKEv2) VPN with single sign-on on Linux, which Fortinet's own FortiClient can't do. Archway also connects to Azure VPN gateways that sign you in with Microsoft Entra ID, which has no supported Linux client since Microsoft retired its Azure VPN Client for Linux.
 
-Archway is a desktop frontend for existing VPN engines. FortiGate connections run on [strongSwan](https://www.strongswan.org/), the open-source IPsec implementation, which handles the key exchange, encryption and tunnel; Archway adds the FortiGate SSO login and sets up routes and DNS. Azure VPN connections run on [OpenVPN® 3 Linux](https://github.com/OpenVPN/openvpn3-linux); Archway adds the Entra sign-in and the connection settings from the Azure profile.
+Archway is a desktop frontend for existing VPN engines. FortiGate connections run on [strongSwan](https://www.strongswan.org/), the open-source IPsec implementation, which handles the key exchange, encryption and tunnel; Archway adds the FortiGate SSO login and sets up routes and DNS. Azure VPN connections run on [OpenVPN® 3 Linux](https://codeberg.org/OpenVPN/openvpn3-linux); Archway adds the Entra sign-in and the connection settings from the Azure profile.
 
 > [!WARNING]
 > Archway is in a very early stage. Expect bugs and rough edges. If something breaks, please open an issue with the log (turn on verbose logging in Settings first).
@@ -23,7 +23,7 @@ Nobody has audited the code. If you find a security problem, see [SECURITY.md](S
 
 - **Azure VPN with Microsoft Entra ID.** Import the profile the Azure portal gives you and sign in through your browser. Archway runs these connections on OpenVPN 3 Linux.
 - **FortiGate IPsec (IKEv2) with single sign-on.** Sign in through your own browser, with your organisation's usual login page, password manager and MFA, which Fortinet's FortiClient for Linux can't do. Classic username and password logins and pre-shared-key-only setups work too. Archway runs these connections on strongSwan.
-- **Built on established VPN engines.** The tunnel itself is handled by open-source VPN software with a long track record: [strongSwan](https://www.strongswan.org/) for FortiGate connections and [OpenVPN 3 Linux](https://github.com/OpenVPN/openvpn3-linux) for Azure VPN. Archway adds the sign-in and the settings.
+- **Built on established VPN engines.** The tunnel itself is handled by open-source VPN software with a long track record: [strongSwan](https://www.strongswan.org/) for FortiGate connections and [OpenVPN 3 Linux](https://codeberg.org/OpenVPN/openvpn3-linux) for Azure VPN. Archway adds the sign-in and the settings.
 - **Flexible routing.** Send only your company's networks through the VPN, route all traffic through it, or pick the networks yourself.
 - **Leak protection.** Archway uses the VPN's DNS so internal servers resolve by name, and in full-tunnel mode it blocks IPv6 so nothing bypasses the VPN.
 - **Familiar settings.** Setting names and sections mirror FortiClient's, so you can copy a working configuration field by field. Most defaults match FortiClient's too; certificate verification on the SSO port is on by default.
