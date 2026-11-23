@@ -31,6 +31,7 @@ Nobody has audited the code. If you find a security problem, see [SECURITY.md](S
 - **Secrets in your keyring.** Your VPN key and password go in your system's password manager (KWallet, GNOME Keyring, KeePassXC), never in a plain file.
 - **Easy sharing.** Hand a working connection to a colleague as a single file.
 - **Live status.** See your VPN address, connection time and traffic at a glance.
+- **System tray.** Closing or minimizing the window hides to the tray; the process (and VPN) stay up until you **Quit** from the tray. On X11 the window is hidden in place; on Wayland (niri, GNOME, …) the toolkit cannot hide a window, so Archway closes it and reopens it when you choose Show. (On GNOME you typically need an AppIndicator / StatusNotifier extension.)
 - **Minimal privileges.** The app itself never runs as administrator. FortiGate connections ask for your administrator password only while the tunnel is set up; Azure VPN connections don't ask at all.
 
 ## Supported platforms
