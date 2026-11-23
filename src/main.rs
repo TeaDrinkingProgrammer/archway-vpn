@@ -40,7 +40,34 @@ use protocol::BackendEvent;
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// Why `eframe::run_native` returned when a tray is installed (Wayland close-to-tray).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoopExit {
+    /// Window closed; keep the process and tray until Show or Quit.
+    Hide,
+    /// Quit from the tray (or equivalent): tear down and exit.
+    Quit,
+}
+
+/// UI session parked while the window is closed on Wayland (process + VPN + tray stay up).
+struct Parked {
+    tray: Option<tray::Handle>,
+    session: Option<Session>,
+    tx: Sender<Event>,
+    rx: Receiver<Event>,
+    state: State,
+    profile_connected: usize,
+    info: TunnelInfo,
+    since: Option<Instant>,
+    stats: (u64, u64),
+    log: Vec<String>,
+    error: Option<String>,
+    cfg: Config,
+    saved: Config,
+}
 
 /// rustc-style message: `<level>: <headline>` plus a `note` (the cause) and a `help` (what now) line.
 pub fn diag(level: &str, headline: &str, note: &str, help: &str) -> String {
@@ -118,8 +145,16 @@ struct App {
     tray: Option<tray::Handle>,
     /// close the window into the tray instead of quitting (true when `tray` was installed)
     close_to_tray: bool,
-    /// window was closed into the tray (still running)
+    /// window was closed into the tray via Visible(false) on X11 (still running in the same event loop)
     window_hidden: bool,
+    /// Wayland: next window close should park into the tray instead of exiting the process
+    hiding_to_tray: bool,
+    /// Hide by closing+parking the UI (Wayland); false = Visible(false) in the same loop (X11)
+    wayland_hide: bool,
+    /// Shared with `main`: Hide (reopen later) vs Quit
+    loop_exit: Arc<Mutex<Option<LoopExit>>>,
+    /// Shared with `main`: state kept while the Wayland window is closed
+    parking: Arc<Mutex<Option<Parked>>>,
     state: State,
     session: Option<Session>,
     profile_connected: usize,
@@ -268,6 +303,10 @@ impl App {
             tray: None,
             close_to_tray: false,
             window_hidden: false,
+            hiding_to_tray: false,
+            wayland_hide: false,
+            loop_exit: Arc::new(Mutex::new(None)),
+            parking: Arc::new(Mutex::new(None)),
             state: State::Idle,
             session: None,
             profile_connected: 0,
@@ -478,6 +517,17 @@ impl App {
     }
 
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        if self.wayland_hide {
+            // winit cannot set_visible(false) on Wayland — close the window but keep the process
+            // (and VPN/tray) alive; `main` parks us and waits for Show/Quit.
+            self.hiding_to_tray = true;
+            if let Ok(mut g) = self.loop_exit.lock() {
+                *g = Some(LoopExit::Hide);
+            }
+            self.allow_close = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -493,10 +543,89 @@ impl App {
     }
 
     fn quit_from_tray(&mut self, ctx: &egui::Context) {
+        self.hiding_to_tray = false;
+        if let Ok(mut g) = self.loop_exit.lock() {
+            *g = Some(LoopExit::Quit);
+        }
         self.allow_close = true;
         self.window_hidden = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    fn park_for_tray(&mut self) {
+        let (ntx, nrx) = channel();
+        let parked = Parked {
+            tray: self.tray.take(),
+            session: self.session.take(),
+            tx: std::mem::replace(&mut self.tx, ntx),
+            rx: std::mem::replace(&mut self.rx, nrx),
+            state: self.state,
+            profile_connected: self.profile_connected,
+            info: std::mem::take(&mut self.info),
+            since: self.since.take(),
+            stats: self.stats,
+            log: std::mem::take(&mut self.log),
+            error: self.error.take(),
+            cfg: self.cfg.clone(),
+            saved: self.saved.clone(),
+        };
+        if let Ok(mut g) = self.parking.lock() {
+            *g = Some(parked);
+        }
+    }
+
+    fn from_parked(
+        parked: Parked,
+        loop_exit: Arc<Mutex<Option<LoopExit>>>,
+        parking: Arc<Mutex<Option<Parked>>>,
+    ) -> Self {
+        let keyring = keyring::SecretServiceStore::connect()
+            .map(|s| Box::new(s) as Box<dyn keyring::SecretStore>);
+        let (keyring, keyring_warning) = match keyring {
+            Ok(s) => (Some(s), None),
+            Err(u) => (None, Some(u.message())),
+        };
+        App {
+            saved: parked.saved,
+            cfg: parked.cfg,
+            drafts: form::Drafts::default(),
+            save_error: None,
+            keyring,
+            keyring_warning,
+            confirm_close: false,
+            allow_close: false,
+            tray: parked.tray,
+            close_to_tray: true,
+            window_hidden: false,
+            hiding_to_tray: false,
+            wayland_hide: wayland_session(),
+            loop_exit,
+            parking,
+            state: parked.state,
+            session: parked.session,
+            profile_connected: parked.profile_connected,
+            tx: parked.tx,
+            rx: parked.rx,
+            log: parked.log,
+            error: parked.error,
+            info: parked.info,
+            sso_users: SsoUsers::load(&Paths::from_env()),
+            since: parked.since,
+            connect_started: None,
+            fix_focus: None,
+            fix_scroll: false,
+            want_attention: false,
+            show_settings: false,
+            confirm_regen: false,
+            settings_error: None,
+            share_error: None,
+            confirm_delete: false,
+            stats: parked.stats,
+            stats_at: None,
+            glide: glide::Glide::default(),
+            new_connection: None,
+        }
     }
 
     fn handle_tray(&mut self, ctx: &egui::Context) {
@@ -861,9 +990,34 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.hiding_to_tray {
+            self.park_for_tray();
+            return;
+        }
         if let Some(s) = self.session.take() {
             s.shutdown(std::time::Duration::from_secs(8));
         }
+    }
+}
+
+/// Wayland session (niri, GNOME, …): winit cannot hide windows; we close and re-open instead.
+fn wayland_session() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+fn native_options() -> eframe::NativeOptions {
+    eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Archway")
+            .with_app_id("archway-vpn")
+            // X11 shows this; Wayland takes the icon from the installed archway-vpn.desktop (matched by app id)
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/archway-vpn-256.png"))
+                    .expect("valid icon png"),
+            )
+            .with_inner_size([1000.0, 760.0])
+            .with_min_inner_size([760.0, 520.0]),
+        ..Default::default()
     }
 }
 
@@ -879,33 +1033,157 @@ fn main() -> eframe::Result<()> {
     }
     // RUST_LOG=info/debug shows renderer / windowing backend diagnostics (eframe, egui_glow, winit, glutin)
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    let opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Archway")
-            .with_app_id("archway-vpn")
-            // X11 shows this; Wayland takes the icon from the installed archway-vpn.desktop (matched by app id)
-            .with_icon(
-                eframe::icon_data::from_png_bytes(include_bytes!("../assets/archway-vpn-256.png"))
-                    .expect("valid icon png"),
-            )
-            .with_inner_size([1000.0, 760.0])
-            .with_min_inner_size([760.0, 520.0]),
-        ..Default::default()
+
+    let loop_exit = Arc::new(Mutex::new(None));
+    let parking = Arc::new(Mutex::new(None));
+    let mut tray = match tray::Handle::try_new() {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("warning: system tray unavailable: {e}");
+            None
+        }
     };
-    eframe::run_native(
-        "Archway",
-        opts,
-        Box::new(|cc| {
-            theme::install(&cc.egui_ctx);
-            let mut app = App::new();
-            match tray::Handle::try_new() {
-                Ok(t) => {
+
+    loop {
+        let exit = loop_exit.clone();
+        let park = parking.clone();
+        let tray_for_app = tray.take();
+        let has_tray = tray_for_app.is_some();
+
+        eframe::run_native(
+            "Archway",
+            native_options(),
+            Box::new(move |cc| {
+                theme::install(&cc.egui_ctx);
+                let mut app = if let Some(parked) = park.lock().ok().and_then(|mut g| g.take()) {
+                    App::from_parked(parked, exit.clone(), park.clone())
+                } else {
+                    let mut app = App::new();
+                    app.loop_exit = exit.clone();
+                    app.parking = park.clone();
+                    app
+                };
+                if let Some(t) = tray_for_app {
                     app.tray = Some(t);
                     app.close_to_tray = true;
+                    app.wayland_hide = wayland_session();
                 }
-                Err(e) => eprintln!("warning: system tray unavailable: {e}"),
+                Ok(Box::new(app))
+            }),
+        )?;
+
+        match loop_exit.lock().ok().and_then(|mut g| g.take()) {
+            Some(LoopExit::Quit) => {
+                if let Some(p) = parking.lock().ok().and_then(|mut g| g.take()) {
+                    if let Some(s) = p.session {
+                        s.shutdown(Duration::from_secs(8));
+                    }
+                }
+                break Ok(());
             }
-            Ok(Box::new(app))
-        }),
-    )
+            Some(LoopExit::Hide) => {
+                let Some(mut parked) = parking.lock().ok().and_then(|mut g| g.take()) else {
+                    break Ok(());
+                };
+                // Tray-only wait until Show (reopen UI) or Quit.
+                loop {
+                    let actions = parked
+                        .tray
+                        .as_ref()
+                        .map(|t| t.poll())
+                        .unwrap_or_default();
+                    let mut show = false;
+                    for action in actions {
+                        match action {
+                            tray::Action::Show => show = true,
+                            tray::Action::Quit => {
+                                if let Some(s) = parked.session.take() {
+                                    s.shutdown(Duration::from_secs(8));
+                                }
+                                return Ok(());
+                            }
+                            tray::Action::ToggleConnect => {
+                                if parked.state != State::Idle {
+                                    if let Some(s) = &parked.session {
+                                        s.disconnect();
+                                    }
+                                    parked.state = State::Disconnecting;
+                                } else {
+                                    // SSO needs the UI — reopen
+                                    show = true;
+                                }
+                            }
+                        }
+                    }
+                    // Drain session events while the window is gone
+                    while let Ok(ev) = parked.rx.try_recv() {
+                        match ev {
+                            Event::Finished => {
+                                parked.state = State::Idle;
+                                parked.session = None;
+                                parked.since = None;
+                            }
+                            Event::Log(l) => parked.log.push(l),
+                            Event::Error(e) => parked.error = Some(connect_error(e)),
+                            Event::Elevating => parked.state = State::Elevating,
+                            Event::Backend(BackendEvent::Connected) => {
+                                parked.state = State::Connected;
+                                parked.since = Some(Instant::now());
+                            }
+                            Event::Backend(BackendEvent::Disconnecting) => {
+                                parked.state = State::Disconnecting;
+                            }
+                            Event::Backend(BackendEvent::IkeStart { .. }) => {
+                                parked.state = State::Negotiating;
+                            }
+                            Event::Backend(_) => {}
+                        }
+                    }
+                    if let Some(s) = &parked.session
+                        && s.is_finished()
+                    {
+                        parked.session = None;
+                        parked.state = State::Idle;
+                    }
+                    if let Some(t) = &parked.tray {
+                        let name = parked.cfg.profiles[parked.cfg.selected.min(
+                            parked.cfg.profiles.len().saturating_sub(1),
+                        )]
+                        .name
+                        .clone();
+                        let tip = match parked.state {
+                            State::Connected => match parked.info.ip {
+                                Some(ip) => format!("Archway — Connected to {name} ({ip})"),
+                                None => format!("Archway — Connected to {name}"),
+                            },
+                            State::Idle => format!("Archway — Disconnected ({name})"),
+                            other => format!(
+                                "Archway — {} ({name})",
+                                other.label(parked.cfg.profiles[parked.cfg.selected].vpn.kind())
+                            ),
+                        };
+                        t.set_status(parked.state == State::Connected, &tip);
+                    }
+                    if show {
+                        // next run_native picks this up via from_parked (tray included)
+                        if let Ok(mut g) = parking.lock() {
+                            *g = Some(parked);
+                        }
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+            None => {
+                // No tray, or closed without a hide/quit reason → exit
+                if let Some(p) = parking.lock().ok().and_then(|mut g| g.take()) {
+                    if let Some(s) = p.session {
+                        s.shutdown(Duration::from_secs(8));
+                    }
+                }
+                let _ = has_tray;
+                break Ok(());
+            }
+        }
+    }
 }
