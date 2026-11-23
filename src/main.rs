@@ -23,6 +23,7 @@ mod saml;
 mod systemd;
 mod theme;
 mod tls;
+mod tray;
 mod tunnel;
 mod vici;
 mod view;
@@ -111,8 +112,14 @@ struct App {
     keyring_warning: Option<String>,
     /// "Unsaved changes" dialog is open
     confirm_close: bool,
-    /// the user chose Save or Discard; let the next close request through
+    /// the user chose Quit (tray) or confirmed leaving with no tray; let the close request through
     allow_close: bool,
+    /// StatusNotifierItem, when the session bus is available
+    tray: Option<tray::Handle>,
+    /// close the window into the tray instead of quitting (true when `tray` was installed)
+    close_to_tray: bool,
+    /// window was closed into the tray (still running)
+    window_hidden: bool,
     state: State,
     session: Option<Session>,
     profile_connected: usize,
@@ -257,6 +264,10 @@ impl App {
             keyring_warning,
             confirm_close: false,
             allow_close: false,
+            // installed from `main` when a session bus is available; stays None in tests
+            tray: None,
+            close_to_tray: false,
+            window_hidden: false,
             state: State::Idle,
             session: None,
             profile_connected: 0,
@@ -394,11 +405,23 @@ impl App {
         }
     }
 
-    /// Ask before closing with unsaved changes.
+    /// Ask before closing with unsaved changes. With a tray, closing or minimizing hides the window instead of quitting.
     fn close_guard(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.unsaved() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.confirm_close = true;
+        // Minimize (＿): same as close-to-tray when a tray is available. Some compositors
+        // (e.g. niri) barely support minimize; Visible(false) is what actually "icons" us.
+        if self.close_to_tray
+            && !self.window_hidden
+            && ctx.input(|i| i.viewport().minimized == Some(true))
+        {
+            self.hide_to_tray(ctx);
+        }
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
+            if self.unsaved() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.confirm_close = true;
+            } else if self.close_to_tray {
+                self.hide_to_tray(ctx);
+            }
         }
         if !self.confirm_close {
             return;
@@ -408,7 +431,11 @@ impl App {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label("Save your changes before closing?");
+                ui.label(if self.close_to_tray {
+                    "Save your changes before hiding to the tray?"
+                } else {
+                    "Save your changes before closing?"
+                });
                 if let Some(e) = &self.save_error {
                     ui.label(
                         RichText::new(e)
@@ -423,23 +450,105 @@ impl App {
                         .clicked()
                     {
                         self.save();
-                        // on failure the dialog stays open with the error; Discard still closes
+                        // on failure the dialog stays open with the error; Discard still proceeds
                         if !self.unsaved() {
                             self.confirm_close = false;
-                            self.allow_close = true;
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            self.finish_close_request(ctx);
                         }
                     }
                     if ui.button("Discard").clicked() {
                         self.confirm_close = false;
-                        self.allow_close = true;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        self.finish_close_request(ctx);
                     }
                     if ui.button("Cancel").clicked() {
                         self.confirm_close = false;
                     }
                 });
             });
+    }
+
+    /// After the unsaved dialog (or when there was nothing to save): tray → hide, else quit.
+    fn finish_close_request(&mut self, ctx: &egui::Context) {
+        if self.close_to_tray {
+            self.hide_to_tray(ctx);
+        } else {
+            self.allow_close = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn hide_to_tray(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.window_hidden = true;
+    }
+
+    fn show_from_tray(&mut self, ctx: &egui::Context) {
+        self.window_hidden = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+
+    fn quit_from_tray(&mut self, ctx: &egui::Context) {
+        self.allow_close = true;
+        self.window_hidden = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        let Some(tray) = &self.tray else {
+            return;
+        };
+        let actions = tray.poll();
+        for action in actions {
+            match action {
+                tray::Action::Show => self.show_from_tray(ctx),
+                tray::Action::ToggleConnect => {
+                    if self.state == State::Idle {
+                        let problems = self.problems();
+                        if self.blocks_connect(&problems) {
+                            self.error = Some(diag(
+                                "error",
+                                "can't connect",
+                                FIX_FIRST,
+                                "open Archway from the tray and fix the fields marked ⚠",
+                            ));
+                            self.show_from_tray(ctx);
+                        } else {
+                            self.connect(ctx);
+                        }
+                    } else if self.state == State::Connected
+                        || self.state == State::Authenticating
+                        || self.state == State::Elevating
+                        || self.state == State::Negotiating
+                    {
+                        self.disconnect();
+                    }
+                }
+                tray::Action::Quit => self.quit_from_tray(ctx),
+            }
+        }
+        self.refresh_tray_status();
+    }
+
+    fn refresh_tray_status(&self) {
+        let Some(tray) = &self.tray else {
+            return;
+        };
+        let p = &self.cfg.profiles[self.cfg.selected];
+        let tooltip = match self.state {
+            State::Connected => match self.info.ip {
+                Some(ip) => format!("Archway — Connected to {} ({ip})", p.name),
+                None => format!("Archway — Connected to {}", p.name),
+            },
+            State::Idle => format!("Archway — Disconnected ({})", p.name),
+            other => format!("Archway — {} ({})", other.label(p.vpn.kind()), p.name),
+        };
+        tray.set_status(self.state == State::Connected, &tooltip);
     }
 
     /// Regenerate button: ask first, the FortiGate will see a new device.
@@ -710,18 +819,27 @@ impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         self.handle_events();
+        self.handle_tray(&ctx);
         if let Some(nc) = &mut self.new_connection {
             nc.poll();
         }
         let problems = self.problems();
         if std::mem::take(&mut self.want_attention) {
+            if self.window_hidden {
+                self.show_from_tray(&ctx);
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
                 egui::UserAttentionType::Informational,
             ));
         }
         self.read_stats();
-        if self.busy() {
-            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        // tray menu clicks need a wake-up even while the window is hidden / idle
+        if self.busy() || self.tray.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(if self.busy() {
+                1000
+            } else {
+                250
+            }));
         }
         let save_key = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
         if ctx.input_mut(|i| i.consume_shortcut(&save_key)) && self.unsaved() && problems.is_empty()
@@ -779,7 +897,15 @@ fn main() -> eframe::Result<()> {
         opts,
         Box::new(|cc| {
             theme::install(&cc.egui_ctx);
-            Ok(Box::new(App::new()))
+            let mut app = App::new();
+            match tray::Handle::try_new() {
+                Ok(t) => {
+                    app.tray = Some(t);
+                    app.close_to_tray = true;
+                }
+                Err(e) => eprintln!("warning: system tray unavailable: {e}"),
+            }
+            Ok(Box::new(app))
         }),
     )
 }

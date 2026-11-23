@@ -403,6 +403,35 @@ fn close_without_changes_goes_through() {
 }
 
 #[test]
+fn close_with_tray_hides_instead_of_quitting() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    app.close_to_tray = true;
+    let mut f = Frames::new();
+    let cmds = f.run(&mut app, true, vec![]);
+    assert!(cmds.contains(&egui::ViewportCommand::CancelClose));
+    assert!(cmds.contains(&egui::ViewportCommand::Visible(false)));
+    assert!(app.window_hidden);
+    assert!(!app.confirm_close);
+}
+
+#[test]
+fn close_with_tray_and_changes_asks_then_hides() {
+    let _t = TempConfig::new();
+    let mut app = app_with(&MemoryStore::default());
+    app.close_to_tray = true;
+    app.cfg.profiles[0].description = "dirty".into();
+    let mut f = Frames::new();
+    f.run(&mut app, true, vec![]);
+    f.run(&mut app, false, vec![]);
+    assert!(f.has("Save your changes before hiding to the tray?"));
+    let cmds = f.click(&mut app, "Discard");
+    assert!(cmds.contains(&egui::ViewportCommand::CancelClose));
+    assert!(cmds.contains(&egui::ViewportCommand::Visible(false)));
+    assert!(app.window_hidden);
+}
+
+#[test]
 fn close_with_changes_asks_and_cancel_keeps_them() {
     let _t = TempConfig::new();
     let mut app = app_with(&MemoryStore::default());

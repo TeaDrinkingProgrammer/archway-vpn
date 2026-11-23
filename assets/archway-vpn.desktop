@@ -9,3 +9,5 @@ Terminal=false
 Categories=Network;
 Keywords=VPN;IPsec;IKEv2;SAML;SSO;FortiGate;
 StartupWMClass=archway-vpn
+# StatusNotifierItem (tray): close hides to tray; Quit on the menu exits
+X-GNOME-UsesNotifications=true

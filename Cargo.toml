@@ -38,6 +38,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde_vici = "0.1"
 toml = { version = "1.1", features = ["preserve_order"] }
+tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 vec1 = { version = "1.12", features = ["serde"] }
 x509-parser = "0.18.1"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
