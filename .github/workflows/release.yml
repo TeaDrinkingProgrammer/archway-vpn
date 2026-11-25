@@ -40,6 +40,10 @@ jobs:
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # Canary fork: the package revision carries a "canary" suffix (0.4.2-1canary1), so the packages install over the
+      # official 0.4.2-1 as an upgrade, and `dpkg -l` / `rpm -q` show which build is installed
+      PKG_REVISION: 1canary1
     # Debian 12 (glibc 2.36), so the binary runs on every distro at least that new: Debian 12/13, Ubuntu 24.04/26.04,
     # Fedora, Arch. Not the ubuntu-24.04 runner: a binary needs at least the glibc it was built against, and 24.04's
     # 2.39 would leave Debian 12 out (newer runners drop Ubuntu 24.04 and Debian 13 too). No -dev packages needed: the
@@ -60,14 +64,15 @@ jobs:
       # the app, then one package per VPN engine that only pulls the engine in (the variants)
       - name: cargo deb
         run: |
-          cargo deb --no-build -o dist/
-          cargo deb --no-build -o dist/ --variant ipsec
-          cargo deb --no-build -o dist/ --variant openvpn
+          cargo deb --no-build -o dist/ --deb-revision "$PKG_REVISION"
+          cargo deb --no-build -o dist/ --deb-revision "$PKG_REVISION" --variant ipsec
+          cargo deb --no-build -o dist/ --deb-revision "$PKG_REVISION" --variant openvpn
+      # the rpm "release" field is the equivalent of the Debian revision
       - name: cargo generate-rpm
         run: |
-          cargo generate-rpm -o dist/
-          cargo generate-rpm -o dist/ --variant ipsec
-          cargo generate-rpm -o dist/ --variant openvpn
+          cargo generate-rpm -o dist/ --set-metadata "release = \"$PKG_REVISION\""
+          cargo generate-rpm -o dist/ --variant ipsec --set-metadata "release = \"$PKG_REVISION\""
+          cargo generate-rpm -o dist/ --variant openvpn --set-metadata "release = \"$PKG_REVISION\""
       - name: Checksums
         run: cd dist && sha256sum -- * > SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
