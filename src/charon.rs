@@ -2,7 +2,9 @@
 //! IKE ports, no routes or addresses of its own (we do those on our xfrm interface), and a plugin allowlist.
 //! Secrets never go into the config file; they're loaded over VICI.
 
-use crate::net::{self, DhGroup, Host, IfName, Ipv4Net, LocalId, Port, Proposal, Secret};
+use crate::net::{
+    self, DhGroup, Host, IfName, Ipv4Net, KeyLifetime, LocalId, Port, Proposal, Secret,
+};
 use crate::netlink::IF_ID;
 use crate::protocol::ClientAuth;
 use crate::vici::{Cmd, Empty, EventName, Status, Vici};
@@ -283,6 +285,10 @@ pub struct ConnParams {
     pub ike_proposals: Vec1<Proposal>,
     pub dh_groups: Vec1<DhGroup>,
     pub esp_proposals: Vec1<Proposal>,
+    /// Phase 2 DH groups (PFS); empty: no PFS
+    pub esp_dh_groups: Vec<DhGroup>,
+    pub ike_lifetime: KeyLifetime,
+    pub esp_lifetime: KeyLifetime,
     pub local_id: Option<LocalId>,
     pub auth: ClientAuth,
     pub psk: Secret,
@@ -308,6 +314,9 @@ struct AuthSection {
 struct ChildSection {
     remote_ts: Vec<Ipv4Net>,
     esp_proposals: Vec<String>,
+    /// seconds: the key expires after this, and is rekeyed 10 to 20 % earlier
+    life_time: u32,
+    rekey_time: u32,
     if_id_in: String,
     if_id_out: String,
 }
@@ -321,6 +330,10 @@ struct ConnSection {
     vips: Vec<Ipv4Addr>,
     proposals: Vec<String>,
     keyingtries: u32,
+    /// seconds: the IKE key is rekeyed this long after it was made...
+    rekey_time: u32,
+    /// ...and expires this long after the rekey started
+    over_time: u32,
     /// seconds
     dpd_delay: u32,
     local: AuthSection,
@@ -344,7 +357,9 @@ pub fn conn_message(p: &ConnParams) -> BTreeMap<String, impl Serialize> {
     };
     let child = ChildSection {
         remote_ts: vec![Ipv4Net::ALL],
-        esp_proposals: net::esp_proposals(&p.esp_proposals),
+        esp_proposals: net::esp_proposals(&p.esp_proposals, &p.esp_dh_groups),
+        life_time: p.esp_lifetime.get(),
+        rekey_time: p.esp_lifetime.rekey_secs(),
         if_id_in: format!("{IF_ID:#x}"),
         if_id_out: format!("{IF_ID:#x}"),
     };
@@ -356,6 +371,8 @@ pub fn conn_message(p: &ConnParams) -> BTreeMap<String, impl Serialize> {
         vips: vec![Ipv4Addr::UNSPECIFIED],
         proposals: net::ike_proposals(&p.ike_proposals, &p.dh_groups),
         keyingtries: 1,
+        rekey_time: p.ike_lifetime.rekey_secs(),
+        over_time: p.ike_lifetime.over_secs(),
         dpd_delay: 30,
         local,
         remote: AuthSection {
@@ -661,6 +678,9 @@ mod tests {
             ike_proposals: vec1!["aes128-sha1".parse().unwrap()],
             dh_groups: vec1![DhGroup::Ecp384],
             esp_proposals: vec1!["aes128-sha1".parse().unwrap()],
+            esp_dh_groups: vec![DhGroup::Ecp384],
+            ike_lifetime: KeyLifetime::try_from(86_400).unwrap(),
+            esp_lifetime: KeyLifetime::try_from(43_200).unwrap(),
             local_id: None,
             auth: ClientAuth::Eap {
                 identity: EapIdentity::Uid("0123456789ABCDEF0123456789ABCDEF".parse().unwrap()),
@@ -722,6 +742,21 @@ mod tests {
     }
 
     #[test]
+    fn conn_message_phase_2_pfs_follows_the_groups() {
+        let count = |p: &ConnParams| {
+            let m = serde_vici::to_vec(&conn_message(p)).unwrap();
+            let needle = b"aes128-sha1-ecp384";
+            m.windows(needle.len()).filter(|w| *w == needle).count()
+        };
+        let mut p = params();
+        // Phase 1 and Phase 2 both name the group
+        assert_eq!(count(&p), 2);
+        // no PFS: only the Phase 1 proposal has a group
+        p.esp_dh_groups.clear();
+        assert_eq!(count(&p), 1);
+    }
+
+    #[test]
     fn conn_message_shape() {
         let m = serde_vici::to_vec(&conn_message(&params())).unwrap();
         let s = String::from_utf8_lossy(&m);
@@ -753,6 +788,11 @@ mod tests {
             ("keyingtries", "1"),
             ("dpd_delay", "30"),
             ("auth", "eap"),
+            // Phase 1 24 h: rekey at 90 %, 10 % to finish; Phase 2 12 h: expires at 12 h, rekey at 90 %
+            ("rekey_time", "77760"),
+            ("over_time", "8640"),
+            ("life_time", "43200"),
+            ("rekey_time", "38880"),
         ] {
             assert!(has(kv(k, v)), "{k} = {v} missing");
         }

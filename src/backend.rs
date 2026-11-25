@@ -191,6 +191,9 @@ pub fn build_request(
         })?,
         ike_proposals: proposals(&p.ike.proposals, "Phase 1")?,
         esp_proposals: proposals(&p.esp.proposals, "Phase 2")?,
+        esp_dh_groups: p.esp.dh_groups.clone(),
+        ike_lifetime: p.ike.lifetime,
+        esp_lifetime: p.esp.lifetime,
         natt_keepalive: p.ike.natt_keepalive,
         ifname: p.network.ifname.clone(),
         mtu: p.network.mtu,
@@ -505,6 +508,9 @@ fn session(r: &BackendRequest, child: &mut std::process::Child) -> Result<(), St
         ike_proposals: r.ike_proposals.clone(),
         dh_groups: r.dh_groups.clone(),
         esp_proposals: r.esp_proposals.clone(),
+        esp_dh_groups: r.esp_dh_groups.clone(),
+        ike_lifetime: r.ike_lifetime,
+        esp_lifetime: r.esp_lifetime,
         local_id: r.local_id.clone(),
         auth: r.auth.clone(),
         psk: r.psk.clone(),
@@ -656,6 +662,27 @@ mod tests {
             ["aes128-sha1-ecp384", "aes256-sha256-ecp384"]
         );
         assert_eq!(r.routes, Routes::Gateway);
+    }
+
+    #[test]
+    fn request_carries_key_lifetimes_and_pfs_groups() {
+        use crate::net::{DhGroup, KeyLifetime};
+        let (cfg, mut p) = profile();
+        p.fg().ike.lifetime = KeyLifetime::try_from(7_200).unwrap();
+        p.fg().esp.lifetime = KeyLifetime::try_from(3_600).unwrap();
+        p.fg().esp.dh_groups = vec![DhGroup::Ecp384];
+        let r = build_request(
+            &cfg,
+            &p.psk,
+            p.fortigate().unwrap(),
+            client_auth(&cfg, p.fortigate().unwrap(), Some(token())).unwrap(),
+        )
+        .unwrap();
+        assert_eq!((r.ike_lifetime.get(), r.esp_lifetime.get()), (7_200, 3_600));
+        assert_eq!(
+            crate::net::esp_proposals(&r.esp_proposals, &r.esp_dh_groups),
+            ["aes128-sha1-ecp384", "aes256-sha256-ecp384"]
+        );
     }
 
     #[test]

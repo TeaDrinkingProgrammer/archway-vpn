@@ -4,7 +4,7 @@
 #![no_main]
 
 use archway_vpn::charon::{self, ConnParams};
-use archway_vpn::net::{DhGroup, Port, Secret};
+use archway_vpn::net::{DhGroup, KeyLifetime, Port, Secret};
 use archway_vpn::protocol::{ClientAuth, EapIdentity};
 use archway_vpn::vici::{EventName, Vici};
 use libfuzzer_sys::fuzz_target;
@@ -22,6 +22,9 @@ fn params() -> ConnParams {
         ike_proposals: vec1::vec1!["aes128-sha1".parse().unwrap()],
         dh_groups: vec1::vec1![DhGroup::Ecp384],
         esp_proposals: vec1::vec1!["aes128-sha1".parse().unwrap()],
+        esp_dh_groups: vec![DhGroup::Ecp384],
+        ike_lifetime: KeyLifetime::try_from(86_400).unwrap(),
+        esp_lifetime: KeyLifetime::try_from(43_200).unwrap(),
         local_id: None,
         auth: ClientAuth::Eap {
             identity: EapIdentity::Uid("0123456789ABCDEF0123456789ABCDEF".parse().unwrap()),

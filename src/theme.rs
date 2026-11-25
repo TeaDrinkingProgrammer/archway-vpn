@@ -1147,21 +1147,22 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str, help: Option<&str>) -> eg
     .inner
 }
 
-/// The app icon: two arches on a blue square, as assets/archway-vpn.svg.
+/// The app icon: two dark arches on a canary yellow square (this fork's colours, not the official blue), as assets/archway-vpn.svg.
 pub fn logo(ui: &mut Ui, size: f32) -> egui::Response {
     // assets/archway-vpn.svg: a 512 box with the square at 32..480
     const SQUARE_AT: f32 = 32.0;
     const SQUARE: f32 = 448.0;
-    const BLUE: Color32 = hex(0x1c71d8);
+    const YELLOW: Color32 = hex(0xFFEF00);
+    const DARK: Color32 = hex(0x2b2a33);
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
     let p = ui.painter();
     let s = size / SQUARE;
     let at = |x: f32, y: f32| rect.min + vec2((x - SQUARE_AT) * s, (y - SQUARE_AT) * s);
-    p.rect_filled(rect, CornerRadius::same((104.0 * s) as u8), BLUE);
-    // `white` is how much white is mixed into the blue: opaque, so the caps don't blend twice with the line
-    let arch = |left: f32, right: f32, top: f32, white: f32, width: f32| {
+    p.rect_filled(rect, CornerRadius::same((104.0 * s) as u8), YELLOW);
+    // `dark` is how much of the dark colour is blended onto the yellow: opaque, so the caps don't blend twice with the line
+    let arch = |left: f32, right: f32, top: f32, dark: f32, width: f32| {
         let (cx, radius) = ((left + right) / 2.0, (right - left) / 2.0);
-        let color = BLUE.lerp_to_gamma(Color32::WHITE, white);
+        let color = YELLOW.lerp_to_gamma(DARK, dark);
         let mut pts = vec![at(left, 404.0)];
         for i in 0..=24 {
             let a = std::f32::consts::PI * (1.0 + i as f32 / 24.0);

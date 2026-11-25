@@ -8,8 +8,8 @@
 //! Every setting has a checked type (net.rs): a file with a bad value is reported and not loaded.
 
 use crate::net::{
-    ClientUid, Description, DhGroup, Encryption, Hash, Host, IfName, Ipv4Net, Keepalive, LocalId,
-    LoginTimeout, Mtu, Port, ProfileName, Proposal, Username,
+    ClientUid, Description, DhGroup, Encryption, Hash, Host, IfName, Ipv4Net, Keepalive,
+    KeyLifetime, LocalId, LoginTimeout, Mtu, Port, ProfileName, Proposal, Username,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -219,12 +219,19 @@ pub struct Ike {
     )]
     pub local_id: Option<LocalId>,
     pub natt_keepalive: Keepalive,
+    /// how long the Phase 1 (IKE) key lives, in seconds
+    pub lifetime: KeyLifetime,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Esp {
     pub proposals: Vec<Proposal>,
+    /// DH groups for PFS: each rekey of the Phase 2 key does a new key exchange. Empty: no PFS. A FortiGate with PFS
+    /// enabled refuses the rekey of a proposal without a group, so the tunnel dies when the first key expires.
+    pub dh_groups: Vec<DhGroup>,
+    /// how long the Phase 2 (ESP) key lives, in seconds
+    pub lifetime: KeyLifetime,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -323,6 +330,7 @@ impl Default for Ike {
             dh_groups: vec![DhGroup::Ecp384],
             local_id: None,
             natt_keepalive: Keepalive::try_from(20).expect("in range"),
+            lifetime: KeyLifetime::try_from(KeyLifetime::PHASE1_DEFAULT).expect("in range"),
         }
     }
 }
@@ -331,6 +339,8 @@ impl Default for Esp {
     fn default() -> Self {
         Self {
             proposals: default_proposals(),
+            dh_groups: Vec::new(),
+            lifetime: KeyLifetime::try_from(KeyLifetime::PHASE2_DEFAULT).expect("in range"),
         }
     }
 }
@@ -1310,6 +1320,45 @@ mod tests {
             "description = \"Office\"\ngateway = \"vpn.example.com\"\n\n[sso]\nport = 10443\n\n[auth]\nusername = \"jane\"\n",
             "struct order"
         );
+    }
+
+    #[test]
+    fn key_lifetimes_and_pfs_round_trip_and_old_files_still_load() {
+        // a file written before these settings existed: Phase 1 24 h, Phase 2 12 h, no PFS
+        let old =
+            parse_profile("gateway = \"vpn.example.com\"\n\n[ike]\ndh_groups = [20]\n").unwrap();
+        let (ike, esp) = match &old.vpn {
+            Vpn::FortiGate(f) => (&f.ike, &f.esp),
+            _ => unreachable!(),
+        };
+        assert_eq!(ike.lifetime.get(), 86_400);
+        assert_eq!(esp.lifetime.get(), 43_200);
+        assert!(esp.dh_groups.is_empty());
+
+        let mut p = Profile::default();
+        p.fg().gateway = Some("vpn.example.com".parse().unwrap());
+        p.fg().ike.lifetime = KeyLifetime::try_from(7_200).unwrap();
+        p.fg().esp.lifetime = KeyLifetime::try_from(3_600).unwrap();
+        p.fg().esp.dh_groups = vec![DhGroup::Ecp384, DhGroup::Ecp521];
+        let s = sparse(&p);
+        assert!(s.contains("lifetime = 7200"), "Phase 1: {s}");
+        assert!(
+            s.contains("[esp]") && s.contains("lifetime = 3600"),
+            "Phase 2: {s}"
+        );
+        assert!(s.contains("dh_groups = [20, 21]"), "PFS groups: {s}");
+        let back = parse_profile(&s).unwrap();
+        let (ike, esp) = match &back.vpn {
+            Vpn::FortiGate(f) => (&f.ike, &f.esp),
+            _ => unreachable!(),
+        };
+        assert_eq!(ike.lifetime.get(), 7_200);
+        assert_eq!(esp.lifetime.get(), 3_600);
+        assert_eq!(esp.dh_groups, vec![DhGroup::Ecp384, DhGroup::Ecp521]);
+        // out-of-range values are rejected, not clamped
+        assert!(parse_profile("[ike]\nlifetime = 10\n").is_err());
+        assert!(parse_profile("[esp]\nlifetime = 999999\n").is_err());
+        assert!(parse_profile("[esp]\ndh_groups = [5]\n").is_err());
     }
 
     #[test]

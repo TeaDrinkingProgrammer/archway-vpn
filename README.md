@@ -79,6 +79,8 @@ On Arch Linux, build the package with the PKGBUILD in `packaging/aur/`, and inst
    - With SSO, turn on *Enable Single Sign On (SSO) for VPN Tunnel* and set **SSO Port** to the FortiGate's `auth-ike-saml-port`, for example 10443.
    - Without SSO, choose *Username and password (EAP)* or *None (pre-shared key only)*.
 3. If your FortiGate or EMS profile needs it, adjust **VPN Settings**, **Phase 1**, **Phase 2** and **Network**. The defaults are FortiClient's: AES128-SHA1 and AES256-SHA256 with DH group 20.
+   - **Key Lifetime (s)**, in Phase 1 and in Phase 2: how long the key lives before it expires, 300 to 604800 seconds. The defaults are FortiClient's: 86400 (24 h) for Phase 1 and 43200 (12 h) for Phase 2. Archway renews the key 10 to 20 % of that time before it expires. In `~/.config/archway-vpn/profiles/<name>.toml` they are `lifetime` under `[ike]` and `[esp]`.
+   - **PFS DH Group**, in Phase 2: select the group(s) the FortiGate uses for Perfect Forward Secrecy (the `dhgrp` of its phase 2 with `pfs enable`). If it has PFS on and none is selected here, the tunnel works until the Phase 2 key is first renewed, then the FortiGate refuses the renewal and the tunnel drops. Leave all unselected only if the phase 2 has `pfs disable`. In the profile file: `dh_groups` under `[esp]`.
 4. Click **Connect**. With SSO your browser opens; log in there. Then the system asks for your password. Once the tunnel is up, the status shows **Connected**.
 
    ![A connected FortiGate connection with its IP address, traffic and routes](docs/connected.png)

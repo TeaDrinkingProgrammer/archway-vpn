@@ -4,8 +4,8 @@
 //! before anything runs as root.
 
 use crate::net::{
-    ClientUid, DhGroup, Host, IfName, Ipv4Net, Keepalive, LocalId, Mtu, Port, Proposal, Secret,
-    Username,
+    ClientUid, DhGroup, Host, IfName, Ipv4Net, Keepalive, KeyLifetime, LocalId, Mtu, Port,
+    Proposal, Secret, Username,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -73,6 +73,11 @@ pub struct BackendRequest {
     pub dh_groups: Vec1<DhGroup>,
     pub ike_proposals: Vec1<Proposal>,
     pub esp_proposals: Vec1<Proposal>,
+    /// Phase 2 DH groups (PFS); empty: no PFS
+    #[serde(default)]
+    pub esp_dh_groups: Vec<DhGroup>,
+    pub ike_lifetime: KeyLifetime,
+    pub esp_lifetime: KeyLifetime,
     pub natt_keepalive: Keepalive,
     pub ifname: IfName,
     pub mtu: Mtu,
@@ -150,6 +155,9 @@ mod tests {
             dh_groups: vec1![DhGroup::Ecp384],
             ike_proposals: vec1!["aes128-sha1".parse().unwrap()],
             esp_proposals: vec1!["aes128-sha1".parse().unwrap()],
+            esp_dh_groups: vec![DhGroup::Ecp384],
+            ike_lifetime: KeyLifetime::try_from(86_400).unwrap(),
+            esp_lifetime: KeyLifetime::try_from(43_200).unwrap(),
             natt_keepalive: Keepalive::try_from(20).unwrap(),
             ifname: "archway0".parse().unwrap(),
             mtu: Mtu::try_from(1400).unwrap(),
@@ -179,6 +187,9 @@ mod tests {
         assert!(!rejected(&|_| {}));
         assert!(rejected(&|v| v["ike_proposals"] = json!([])));
         assert!(rejected(&|v| v["esp_proposals"] = json!([])));
+        assert!(rejected(&|v| v["ike_lifetime"] = json!(10)));
+        assert!(rejected(&|v| v["esp_lifetime"] = json!(10_000_000)));
+        assert!(rejected(&|v| v["esp_dh_groups"] = json!([5])));
         assert!(rejected(&|v| v["dh_groups"] = json!([])));
         assert!(rejected(&|v| v["routes"] = json!({"Custom": []})));
         assert!(

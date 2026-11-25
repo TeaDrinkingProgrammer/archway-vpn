@@ -3,7 +3,9 @@
 
 use crate::diag::{Diag, Fix};
 use crate::form::{self, DraftOwner, Drafts, Field, Look, WIDE};
-use crate::net::{DhGroup, Encryption, Hash, Ipv4Net, Keepalive, LoginTimeout, Mtu, Proposal};
+use crate::net::{
+    DhGroup, Encryption, Hash, Ipv4Net, Keepalive, KeyLifetime, LoginTimeout, Mtu, Proposal,
+};
 use crate::theme::{self, BannerKind, PillKind, Tone, icon};
 use crate::*;
 use eframe::egui::{self, Align, Color32, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
@@ -1661,21 +1663,47 @@ fn advanced_cards(ui: &mut Ui, drafts: &mut Drafts, owner: &DraftOwner, p: &mut 
                 )
             });
         });
+        // its own row: LocalId, keepalive and lifetime side by side would not fit the window's minimum width
+        form::column(ui, 180.0, "Key Lifetime (s)", |ui| {
+            (
+                lifetime(ui, &mut p.ike.lifetime, "Phase 1 Key Lifetime"),
+                None,
+            )
+        });
     });
 
-    theme::fold_card(
-        ui,
-        "Phase 2",
-        &proposals_summary(&p.esp.proposals),
-        p.esp.proposals.is_empty(),
-        |ui| {
-            proposal_rows(ui, "p2", &mut p.esp.proposals);
-            form::warning_slot(
-                ui,
-                p.esp.proposals.is_empty().then_some(config::NO_P2_PROPOSAL),
-            );
-        },
+    let pfs = p
+        .esp
+        .dh_groups
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let p2 = format!(
+        "{} · PFS {}",
+        proposals_summary(&p.esp.proposals),
+        if pfs.is_empty() { "off" } else { &pfs }
     );
+    theme::fold_card(ui, "Phase 2", &p2, p.esp.proposals.is_empty(), |ui| {
+        proposal_rows(ui, "p2", &mut p.esp.proposals);
+        form::warning_slot(
+            ui,
+            p.esp.proposals.is_empty().then_some(config::NO_P2_PROPOSAL),
+        );
+        ui.label(theme::caption(ui, "PFS DH Groups (none: PFS off)"));
+        dh_checkboxes(ui, &mut p.esp.dh_groups);
+        ui.label(theme::weak(
+            ui,
+            "Select the group the FortiGate uses for Perfect Forward Secrecy. Without it, a FortiGate with PFS \
+             enabled refuses to renew the key and the tunnel drops when the key expires.",
+        ));
+        form::column(ui, 180.0, "Key Lifetime (s)", |ui| {
+            (
+                lifetime(ui, &mut p.esp.lifetime, "Phase 2 Key Lifetime"),
+                None,
+            )
+        });
+    });
 
     let routing = match p.network.route_mode {
         RouteMode::Gateway => "routes from the FortiGate",
@@ -1919,6 +1947,24 @@ fn proposal_rows(ui: &mut Ui, id: &str, props: &mut Vec<Proposal>) {
     }
     if props.len() < MAX_PROPOSALS && theme::quiet(ui, icon::PLUS, "Add Proposal").clicked() {
         props.push(Proposal::default());
+    }
+}
+
+/// DragValue for a key lifetime in seconds. Like `ranged`, but the lifetime goes up to a week, so it is a `u32`
+/// and one drag step is a minute.
+fn lifetime(ui: &mut Ui, value: &mut KeyLifetime, label: &str) {
+    let mut v = value.get();
+    theme::labelled(
+        ui.add_sized(
+            [120.0, 38.0],
+            egui::DragValue::new(&mut v)
+                .range(KeyLifetime::RANGE)
+                .speed(60),
+        ),
+        label,
+    );
+    if let Ok(t) = KeyLifetime::try_from(v) {
+        *value = t;
     }
 }
 

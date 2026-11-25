@@ -231,6 +231,52 @@ ranged_u16!(
     /// How long the SSO login may take, in seconds, 30-3600.
     LoginTimeout, 30, 3600, "The login timeout"
 );
+/// How long a Phase 1 or Phase 2 key lives before it expires, in seconds, 5 minutes to 7 days. The key is renewed
+/// (rekeyed) between 10 and 20 % of that time before it expires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u32", into = "u32")]
+pub struct KeyLifetime(u32);
+
+impl TryFrom<u32> for KeyLifetime {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, String> {
+        if Self::RANGE.contains(&v) {
+            Ok(Self(v))
+        } else {
+            Err(format!(
+                "The key lifetime must be {} to {} seconds.",
+                Self::RANGE.start(),
+                Self::RANGE.end()
+            ))
+        }
+    }
+}
+
+impl From<KeyLifetime> for u32 {
+    fn from(v: KeyLifetime) -> u32 {
+        v.0
+    }
+}
+
+impl KeyLifetime {
+    pub const RANGE: std::ops::RangeInclusive<u32> = 300..=604_800;
+    pub fn get(self) -> u32 {
+        self.0
+    }
+    /// The rekey is due this long after the key was made: 90 % of the lifetime. strongSwan starts it a little
+    /// earlier at random (between 80 and 90 %), so that both ends don't rekey at the same moment.
+    pub fn rekey_secs(self) -> u32 {
+        self.0 - self.0 / 10
+    }
+    /// The time between the start of the rekey and the expiry.
+    pub fn over_secs(self) -> u32 {
+        self.0 / 10
+    }
+    /// FortiClient's Phase 1 default: 24 hours.
+    pub const PHASE1_DEFAULT: u32 = 86_400;
+    /// FortiClient's Phase 2 default: 12 hours.
+    pub const PHASE2_DEFAULT: u32 = 43_200;
+}
 
 /// A PSK, token or password: never empty, printed as `<redacted>` by `Debug`, and wiped from memory when dropped.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
@@ -442,29 +488,46 @@ impl fmt::Display for Proposal {
     }
 }
 
-/// strongSwan IKE proposals: one per Phase 1 proposal, each with all DH groups, strongest first (the first one goes
-/// in the KE payload).
-pub fn ike_proposals(props: &Vec1<Proposal>, groups: &Vec1<DhGroup>) -> Vec<String> {
-    let order = [
+/// The DH group names for a proposal: ecp384 (group 20, FortiClient's default) first, because the first one goes in
+/// the KE payload; the gateway answers with the group it wants if that one is not accepted.
+fn dh_names(groups: &[DhGroup]) -> Vec<&'static str> {
+    [
         DhGroup::Ecp384,
         DhGroup::Ecp521,
         DhGroup::Ecp256,
         DhGroup::Modp2048,
-    ];
-    let g: Vec<&str> = order
-        .iter()
-        .filter(|x| groups.contains(x))
-        .map(|x| x.swan())
-        .collect();
+    ]
+    .iter()
+    .filter(|x| groups.contains(x))
+    .map(|x| x.swan())
+    .collect()
+}
+
+/// One strongSwan proposal per `props`, each followed by all `groups` (none: no key exchange in the proposal).
+fn with_groups(props: &Vec1<Proposal>, groups: &[DhGroup]) -> Vec<String> {
+    let g = dh_names(groups);
     props
         .iter()
-        .map(|p| format!("{p}-{}", g.join("-")))
+        .map(|p| {
+            if g.is_empty() {
+                p.to_string()
+            } else {
+                format!("{p}-{}", g.join("-"))
+            }
+        })
         .collect()
 }
 
-/// strongSwan ESP proposals: one per Phase 2 proposal.
-pub fn esp_proposals(props: &Vec1<Proposal>) -> Vec<String> {
-    props.iter().map(ToString::to_string).collect()
+/// strongSwan IKE proposals: one per Phase 1 proposal, each with all DH groups.
+pub fn ike_proposals(props: &Vec1<Proposal>, groups: &Vec1<DhGroup>) -> Vec<String> {
+    with_groups(props, groups)
+}
+
+/// strongSwan ESP proposals: one per Phase 2 proposal. With DH groups the rekeys use PFS (a new key exchange), which
+/// a FortiGate with PFS enabled demands: without it, it refuses the first rekey and the tunnel dies when the Phase 2
+/// key expires. No groups: no PFS.
+pub fn esp_proposals(props: &Vec1<Proposal>, groups: &[DhGroup]) -> Vec<String> {
+    with_groups(props, groups)
 }
 
 /// The FortiClient installation UID: 32 hex characters, sent with the SSO login and used as the EAP identity, so it
@@ -1196,6 +1259,58 @@ mod tests {
     }
 
     #[test]
+    fn key_lifetime_bounds_and_rekey_split() {
+        for ok in [300, 43_200, 86_400, 604_800] {
+            assert_eq!(KeyLifetime::try_from(ok).unwrap().get(), ok);
+        }
+        for bad in [0, 299, 604_801, u32::MAX] {
+            assert_eq!(
+                KeyLifetime::try_from(bad).unwrap_err(),
+                "The key lifetime must be 300 to 604800 seconds."
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<KeyLifetime>("100")
+                .unwrap_err()
+                .to_string(),
+            "The key lifetime must be 300 to 604800 seconds."
+        );
+        // the rekey is due at 90 %, and the two parts add up to the lifetime
+        let l = KeyLifetime::try_from(43_200).unwrap();
+        assert_eq!((l.rekey_secs(), l.over_secs()), (38_880, 4_320));
+        for secs in [300, 301, 3_599, 86_400, 604_800] {
+            let l = KeyLifetime::try_from(secs).unwrap();
+            assert_eq!(l.rekey_secs() + l.over_secs(), secs);
+        }
+        assert!(KeyLifetime::try_from(KeyLifetime::PHASE1_DEFAULT).is_ok());
+        assert!(KeyLifetime::try_from(KeyLifetime::PHASE2_DEFAULT).is_ok());
+    }
+
+    #[test]
+    fn esp_proposals_carry_the_pfs_groups() {
+        use vec1::vec1;
+        let p = vec1![
+            "aes256-sha512".parse::<Proposal>().unwrap(),
+            "aes256-sha256".parse().unwrap()
+        ];
+        // no groups: no PFS, as before
+        assert_eq!(esp_proposals(&p, &[]), ["aes256-sha512", "aes256-sha256"]);
+        // one group (group 20 is ecp384)
+        assert_eq!(
+            esp_proposals(&p, &[DhGroup::Ecp384]),
+            ["aes256-sha512-ecp384", "aes256-sha256-ecp384"]
+        );
+        // several groups, ecp384 first whatever the order they were selected in
+        assert_eq!(
+            esp_proposals(&p, &[DhGroup::Modp2048, DhGroup::Ecp521, DhGroup::Ecp384]),
+            [
+                "aes256-sha512-ecp384-ecp521-modp2048",
+                "aes256-sha256-ecp384-ecp521-modp2048"
+            ]
+        );
+    }
+
+    #[test]
     fn proposals_for_strongswan() {
         use vec1::vec1;
         let p = vec1![
@@ -1216,7 +1331,7 @@ mod tests {
                 "aes256-sha256-ecp384-modp2048"
             ]
         );
-        assert_eq!(esp_proposals(&p), ["aes128-sha1", "aes256-sha256"]);
+        assert_eq!(esp_proposals(&p, &[]), ["aes128-sha1", "aes256-sha256"]);
         assert!(DhGroup::try_from(5).is_err());
         assert_eq!(serde_json::to_string(&DhGroup::Ecp521).unwrap(), "21");
     }
